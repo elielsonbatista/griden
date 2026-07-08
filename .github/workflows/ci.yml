@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+
+  backend:
+    name: Backend (fmt + clippy + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            build-essential \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Generate sample SQLite database
+        run: |
+          python3 - <<'PY'
+          import sqlite3, os
+          os.makedirs(".dev", exist_ok=True)
+          c = sqlite3.connect(".dev/sample.db")
+          c.executescript("""
+          CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, born INTEGER);
+          CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL,
+            author_id INTEGER REFERENCES authors(id), price REAL, published DATE);
+          INSERT INTO authors (name, born) VALUES ('Ada Lovelace', 1815), ('Alan Turing', 1912);
+          INSERT INTO books (title, author_id, price, published) VALUES
+            ('Notes on the Analytical Engine', 1, 42.50, '1843-10-01'),
+            ('Computing Machinery', 2, 19.99, '1950-10-01');
+          """)
+          c.commit(); c.close()
+          PY
+      - name: fmt
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: test
+        run: cargo test --manifest-path src-tauri/Cargo.toml

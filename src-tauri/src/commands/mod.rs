@@ -1,0 +1,152 @@
+//! Comandos Tauri expostos ao frontend. São wrappers finos sobre o
+//! `ConnectionManager` e a camada de drivers.
+
+use crate::connection::ConnectionManager;
+use crate::edits;
+use crate::error::{AppError, Result};
+use crate::introspection;
+use crate::models::{
+    ColumnMeta, ConnConfig, ConnInput, EditResult, ForeignKey, QueryResult, RowEdit, SchemaInfo,
+    TableColumns, TableInfo,
+};
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+
+#[tauri::command]
+pub fn list_connections(mgr: State<'_, ConnectionManager>) -> Result<Vec<ConnConfig>> {
+    mgr.list_configs()
+}
+
+#[tauri::command]
+pub fn save_connection(mgr: State<'_, ConnectionManager>, input: ConnInput) -> Result<ConnConfig> {
+    mgr.save_config(input)
+}
+
+#[tauri::command]
+pub async fn delete_connection(mgr: State<'_, ConnectionManager>, id: String) -> Result<()> {
+    mgr.delete_config(&id).await
+}
+
+#[tauri::command]
+pub async fn test_connection(mgr: State<'_, ConnectionManager>, input: ConnInput) -> Result<()> {
+    mgr.test(&input).await
+}
+
+#[tauri::command]
+pub async fn connect(mgr: State<'_, ConnectionManager>, id: String) -> Result<()> {
+    mgr.connect(&id).await
+}
+
+#[tauri::command]
+pub async fn disconnect(mgr: State<'_, ConnectionManager>, id: String) -> Result<()> {
+    mgr.disconnect(&id).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn is_connected(mgr: State<'_, ConnectionManager>, id: String) -> Result<bool> {
+    Ok(mgr.is_connected(&id).await)
+}
+
+#[tauri::command]
+pub async fn run_query(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    sql: String,
+) -> Result<QueryResult> {
+    let pool = mgr.get_pool(&id).await?;
+    pool.execute(&sql).await
+}
+
+#[tauri::command]
+pub async fn get_schemas(mgr: State<'_, ConnectionManager>, id: String) -> Result<Vec<SchemaInfo>> {
+    let pool = mgr.get_pool(&id).await?;
+    introspection::list_schemas(&pool).await
+}
+
+#[tauri::command]
+pub async fn get_tables(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    schema: String,
+) -> Result<Vec<TableInfo>> {
+    let pool = mgr.get_pool(&id).await?;
+    introspection::list_tables(&pool, &schema).await
+}
+
+#[tauri::command]
+pub async fn get_columns(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    schema: String,
+    table: String,
+) -> Result<Vec<ColumnMeta>> {
+    let pool = mgr.get_pool(&id).await?;
+    introspection::list_columns(&pool, &schema, &table).await
+}
+
+#[tauri::command]
+pub async fn get_schema_columns(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    schema: String,
+) -> Result<Vec<TableColumns>> {
+    let pool = mgr.get_pool(&id).await?;
+    introspection::list_all_columns(&pool, &schema).await
+}
+
+#[tauri::command]
+pub async fn get_foreign_keys(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    schema: String,
+) -> Result<Vec<ForeignKey>> {
+    let pool = mgr.get_pool(&id).await?;
+    introspection::list_foreign_keys(&pool, &schema).await
+}
+
+/// Abre um diálogo nativo "salvar como" e grava o conteúdo (CSV, JSON, etc.). O
+/// filtro de arquivo é derivado da extensão de `default_name`. Retorna `false`
+/// se o usuário cancelar. O download via <a> não funciona no webview.
+#[tauri::command]
+pub async fn save_file(app: AppHandle, default_name: String, content: String) -> Result<bool> {
+    let ext = std::path::Path::new(&default_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("txt")
+        .to_string();
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter(ext.to_uppercase(), &[ext.as_str()])
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let Some(path) = rx.await.map_err(|e| AppError::Other(e.to_string()))? else {
+        return Ok(false);
+    };
+    let path = path
+        .into_path()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(path, content)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn apply_edits(
+    mgr: State<'_, ConnectionManager>,
+    id: String,
+    changes: Vec<RowEdit>,
+) -> Result<EditResult> {
+    let pool = mgr.get_pool(&id).await?;
+    let kind = pool.kind();
+    let statements: Vec<String> = changes
+        .iter()
+        .map(|e| edits::build_sql(kind, e))
+        .collect::<Result<_>>()?;
+    let affected = pool.execute_tx(&statements).await?;
+    Ok(EditResult { affected })
+}
