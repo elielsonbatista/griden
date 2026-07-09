@@ -4,7 +4,8 @@ import { api, errMessage } from "@/lib/ipc";
 import type { ForeignKey, QueryResult } from "@/types";
 import type { FilterCondition } from "@/lib/query";
 
-let seq = 1;
+let idSeq = 1;
+let queryTitleSeq = 1;
 
 /** Contexto que torna o grid editável (aba aberta a partir de uma tabela). */
 export interface EditableSource {
@@ -91,12 +92,12 @@ export const useEditor = create<EditorState>()(
       history: [],
 
       openTab(connId, connName, sql = "", title, editable, foreignKeys, source, initialFilters) {
-        const id = `tab-${seq++}`;
+        const id = `tab-${idSeq++}`;
         const tab: QueryTab = {
           id,
           connId,
           connName,
-          title: title ?? `Query ${seq - 1}`,
+          title: title ?? `Query ${queryTitleSeq++}`,
           sql,
           result: null,
           error: null,
@@ -159,7 +160,7 @@ export const useEditor = create<EditorState>()(
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, result, running: false } : t)),
             history: [
               {
-                id: `h-${seq++}`,
+                id: crypto.randomUUID(),
                 connId: tab.connId,
                 sql: tab.sql,
                 ok: true,
@@ -176,7 +177,7 @@ export const useEditor = create<EditorState>()(
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, error, running: false } : t)),
             history: [
               {
-                id: `h-${seq++}`,
+                id: crypto.randomUUID(),
                 connId: tab.connId,
                 sql: tab.sql,
                 ok: false,
@@ -222,17 +223,17 @@ export const useEditor = create<EditorState>()(
           running: false,
         }));
 
-        // Restored ids collide with `seq` after a reload; bump it past the highest restored number.
-        let maxSeq = 0;
+        // Restored ids collide with idSeq/queryTitleSeq after a reload; bump both past the highest restored number.
+        let maxIdSeq = 0;
+        let maxTitleSeq = 0;
         for (const t of tabs) {
-          const m = /^tab-(\d+)$/.exec(t.id);
-          if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+          const idMatch = /^tab-(\d+)$/.exec(t.id);
+          if (idMatch) maxIdSeq = Math.max(maxIdSeq, Number(idMatch[1]));
+          const titleMatch = /^Query (\d+)$/.exec(t.title);
+          if (titleMatch) maxTitleSeq = Math.max(maxTitleSeq, Number(titleMatch[1]));
         }
-        for (const h of persisted.history) {
-          const m = /^h-(\d+)$/.exec(h.id);
-          if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
-        }
-        seq = Math.max(seq, maxSeq + 1);
+        idSeq = Math.max(idSeq, maxIdSeq + 1);
+        queryTitleSeq = Math.max(queryTitleSeq, maxTitleSeq + 1);
 
         const activeTabId = tabs.some((t) => t.id === persisted.activeTabId)
           ? persisted.activeTabId
