@@ -24,3 +24,17 @@ Signed Root**. Certificate Type: **Code Signing**.
 
 Without this certificate the runner just runs the binary unsigned, same as
 today — nothing breaks if you skip this step.
+
+## `tauri build` (release bundle)
+
+`tauri build` doesn't go through the cargo runner above (it bundles rather
+than runs the binary), so it needs the identity passed explicitly via the
+`APPLE_SIGNING_IDENTITY` env var that Tauri's bundler already supports:
+
+```
+APPLE_SIGNING_IDENTITY="Griden Dev" pnpm tauri build
+```
+
+Without it, `tauri build` ad-hoc-signs the bundle same as before (still
+works, just re-prompts for Keychain access on every rebuild like the dev
+binary used to).
