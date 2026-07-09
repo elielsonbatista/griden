@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Cell, QueryResult } from "@/types";
 import { openTableTab } from "@/lib/tableTab";
+import { shortcutLabel } from "@/lib/platform";
 
 const DOWNLOAD_FORMATS: {
   label: string;
@@ -295,7 +296,7 @@ function EditorPane({
           </DropdownMenu>
         </div>
         <span className="text-xs text-muted-foreground">
-          {connName} · ⌘/Ctrl+Enter · ⌘/Ctrl+Shift+Enter (Executar tudo)
+          {connName} · {shortcutLabel("Enter")} · {shortcutLabel("Shift", "Enter")} (Executar tudo)
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
