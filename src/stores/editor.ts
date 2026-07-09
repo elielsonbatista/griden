@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { api, errMessage } from "@/lib/ipc";
 import type { ForeignKey, QueryResult } from "@/types";
 import type { FilterCondition } from "@/lib/query";
@@ -63,108 +64,182 @@ interface EditorState {
   run: (id: string) => Promise<void>;
 }
 
-export const useEditor = create<EditorState>((set, get) => ({
-  tabs: [],
-  activeTabId: null,
-  history: [],
+type PersistedTab = Pick<
+  QueryTab,
+  | "id"
+  | "connId"
+  | "connName"
+  | "title"
+  | "sql"
+  | "editable"
+  | "foreignKeys"
+  | "source"
+  | "initialFilters"
+>;
 
-  openTab(connId, connName, sql = "", title, editable, foreignKeys, source, initialFilters) {
-    const id = `tab-${seq++}`;
-    const tab: QueryTab = {
-      id,
-      connId,
-      connName,
-      title: title ?? `Query ${seq - 1}`,
-      sql,
-      result: null,
-      error: null,
-      running: false,
-      editable,
-      foreignKeys,
-      source,
-      initialFilters,
-    };
-    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
-    return id;
-  },
+interface PersistedEditorState {
+  activeTabId: string | null;
+  history: HistoryEntry[];
+  tabs: PersistedTab[];
+}
 
-  closeTab(id) {
-    set((s) => {
-      const idx = s.tabs.findIndex((t) => t.id === id);
-      const tabs = s.tabs.filter((t) => t.id !== id);
-      let activeTabId = s.activeTabId;
-      if (s.activeTabId === id) {
-        activeTabId = tabs[Math.max(0, idx - 1)]?.id ?? null;
-      }
-      return { tabs, activeTabId };
-    });
-  },
+export const useEditor = create<EditorState>()(
+  persist<EditorState, [], [], PersistedEditorState>(
+    (set, get) => ({
+      tabs: [],
+      activeTabId: null,
+      history: [],
 
-  moveTab(draggedId, targetId) {
-    if (draggedId === targetId) return;
-    set((s) => {
-      const tabs = [...s.tabs];
-      const from = tabs.findIndex((t) => t.id === draggedId);
-      const to = tabs.findIndex((t) => t.id === targetId);
-      if (from === -1 || to === -1) return {};
-      const [moved] = tabs.splice(from, 1);
-      tabs.splice(to, 0, moved);
-      return { tabs };
-    });
-  },
+      openTab(connId, connName, sql = "", title, editable, foreignKeys, source, initialFilters) {
+        const id = `tab-${seq++}`;
+        const tab: QueryTab = {
+          id,
+          connId,
+          connName,
+          title: title ?? `Query ${seq - 1}`,
+          sql,
+          result: null,
+          error: null,
+          running: false,
+          editable,
+          foreignKeys,
+          source,
+          initialFilters,
+        };
+        set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+        return id;
+      },
 
-  setActiveTab(id) {
-    set({ activeTabId: id });
-  },
+      closeTab(id) {
+        set((s) => {
+          const idx = s.tabs.findIndex((t) => t.id === id);
+          const tabs = s.tabs.filter((t) => t.id !== id);
+          let activeTabId = s.activeTabId;
+          if (s.activeTabId === id) {
+            activeTabId = tabs[Math.max(0, idx - 1)]?.id ?? null;
+          }
+          return { tabs, activeTabId };
+        });
+      },
 
-  setSql(id, sql) {
-    set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, sql } : t)),
-    }));
-  },
+      moveTab(draggedId, targetId) {
+        if (draggedId === targetId) return;
+        set((s) => {
+          const tabs = [...s.tabs];
+          const from = tabs.findIndex((t) => t.id === draggedId);
+          const to = tabs.findIndex((t) => t.id === targetId);
+          if (from === -1 || to === -1) return {};
+          const [moved] = tabs.splice(from, 1);
+          tabs.splice(to, 0, moved);
+          return { tabs };
+        });
+      },
 
-  async run(id) {
-    const tab = get().tabs.find((t) => t.id === id);
-    if (!tab || tab.running || !tab.sql.trim()) return;
+      setActiveTab(id) {
+        set({ activeTabId: id });
+      },
 
-    set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, running: true, error: null } : t)),
-    }));
+      setSql(id, sql) {
+        set((s) => ({
+          tabs: s.tabs.map((t) => (t.id === id ? { ...t, sql } : t)),
+        }));
+      },
 
-    try {
-      const result = await api.runQuery(tab.connId, tab.sql);
-      set((s) => ({
-        tabs: s.tabs.map((t) => (t.id === id ? { ...t, result, running: false } : t)),
-        history: [
-          {
-            id: `h-${seq++}`,
-            connId: tab.connId,
-            sql: tab.sql,
-            ok: true,
-            elapsedMs: result.elapsedMs,
-            rows: result.rows.length,
-            at: Date.now(),
-          },
-          ...s.history,
-        ].slice(0, 200),
-      }));
-    } catch (e) {
-      const error = errMessage(e);
-      set((s) => ({
-        tabs: s.tabs.map((t) => (t.id === id ? { ...t, error, running: false } : t)),
-        history: [
-          {
-            id: `h-${seq++}`,
-            connId: tab.connId,
-            sql: tab.sql,
-            ok: false,
-            elapsedMs: 0,
-            rows: 0,
-            at: Date.now(),
-          },
-          ...s.history,
-        ].slice(0, 200),
-      }));
-    }
-  },
-}));
+      async run(id) {
+        const tab = get().tabs.find((t) => t.id === id);
+        if (!tab || tab.running || !tab.sql.trim()) return;
+
+        set((s) => ({
+          tabs: s.tabs.map((t) => (t.id === id ? { ...t, running: true, error: null } : t)),
+        }));
+
+        try {
+          const result = await api.runQuery(tab.connId, tab.sql);
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, result, running: false } : t)),
+            history: [
+              {
+                id: `h-${seq++}`,
+                connId: tab.connId,
+                sql: tab.sql,
+                ok: true,
+                elapsedMs: result.elapsedMs,
+                rows: result.rows.length,
+                at: Date.now(),
+              },
+              ...s.history,
+            ].slice(0, 200),
+          }));
+        } catch (e) {
+          const error = errMessage(e);
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, error, running: false } : t)),
+            history: [
+              {
+                id: `h-${seq++}`,
+                connId: tab.connId,
+                sql: tab.sql,
+                ok: false,
+                elapsedMs: 0,
+                rows: 0,
+                at: Date.now(),
+              },
+              ...s.history,
+            ].slice(0, 200),
+          }));
+        }
+      },
+    }),
+    {
+      name: "griden-editor",
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        activeTabId: state.activeTabId,
+        history: state.history,
+        tabs: state.tabs.map(
+          ({
+            id,
+            connId,
+            connName,
+            title,
+            sql,
+            editable,
+            foreignKeys,
+            source,
+            initialFilters,
+          }) => ({ id, connId, connName, title, sql, editable, foreignKeys, source, initialFilters }),
+        ),
+      }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as PersistedEditorState | undefined;
+        if (!persisted) return currentState;
+
+        const tabs: QueryTab[] = persisted.tabs.map((t) => ({
+          ...t,
+          result: null,
+          error: null,
+          running: false,
+        }));
+
+        // Restored ids collide with `seq` after a reload; bump it past the highest restored number.
+        let maxSeq = 0;
+        for (const t of tabs) {
+          const m = /^tab-(\d+)$/.exec(t.id);
+          if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+        }
+        for (const h of persisted.history) {
+          const m = /^h-(\d+)$/.exec(h.id);
+          if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+        }
+        seq = Math.max(seq, maxSeq + 1);
+
+        const activeTabId = tabs.some((t) => t.id === persisted.activeTabId)
+          ? persisted.activeTabId
+          : (tabs[0]?.id ?? null);
+
+        return { ...currentState, tabs, activeTabId, history: persisted.history };
+      },
+    },
+  ),
+);
