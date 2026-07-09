@@ -163,7 +163,7 @@ mod tests {
         let _ = std::fs::remove_file(dst);
         std::fs::copy(src, dst).expect("copiar db");
 
-        let pool = AnyPool::connect(&cfg(dst), None).await.unwrap();
+        let pool = AnyPool::connect(&cfg(dst), None, 5).await.unwrap();
 
         // UPDATE
         let mut pk = HashMap::new();

@@ -24,8 +24,39 @@ where
     let pool = mgr.get_pool(id).await?;
     match op(pool).await {
         Err(e) if e.is_connection_lost() => {
+            mgr.reconnect(id)
+                .await
+                .map_err(|_| AppError::Database("Connection lost".into()))?;
             let pool = mgr
-                .reconnect(id)
+                .get_pool(id)
+                .await
+                .map_err(|_| AppError::Database("Connection lost".into()))?;
+            match op(pool).await {
+                Err(e) if e.is_connection_lost() => {
+                    Err(AppError::Database("Connection lost".into()))
+                }
+                other => other,
+            }
+        }
+        other => other,
+    }
+}
+
+/// Como `with_reconnect`, mas sobre o pool de conexão única dedicado à
+/// execução (`run_query`/`apply_edits`) — ver [`ConnectionManager::get_exec_pool`].
+async fn with_reconnect_exec<T, F, Fut>(mgr: &ConnectionManager, id: &str, op: F) -> Result<T>
+where
+    F: Fn(Arc<AnyPool>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let pool = mgr.get_exec_pool(id).await?;
+    match op(pool).await {
+        Err(e) if e.is_connection_lost() => {
+            mgr.reconnect(id)
+                .await
+                .map_err(|_| AppError::Database("Connection lost".into()))?;
+            let pool = mgr
+                .get_exec_pool(id)
                 .await
                 .map_err(|_| AppError::Database("Connection lost".into()))?;
             match op(pool).await {
@@ -81,7 +112,7 @@ pub async fn run_query(
     id: String,
     sql: String,
 ) -> Result<QueryResult> {
-    with_reconnect(&mgr, &id, move |pool| {
+    with_reconnect_exec(&mgr, &id, move |pool| {
         let sql = sql.clone();
         async move { pool.execute(&sql).await }
     })
@@ -191,7 +222,7 @@ pub async fn apply_edits(
         .iter()
         .map(|e| edits::build_sql(kind, e))
         .collect::<Result<_>>()?;
-    let affected = with_reconnect(&mgr, &id, move |pool| {
+    let affected = with_reconnect_exec(&mgr, &id, move |pool| {
         let statements = statements.clone();
         async move { pool.execute_tx(&statements).await }
     })

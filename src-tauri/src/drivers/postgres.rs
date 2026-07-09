@@ -7,7 +7,11 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgRow};
 use sqlx::{Column, Connection, Row, TypeInfo};
 use std::time::{Duration, Instant};
 
-pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<sqlx::PgPool> {
+pub async fn connect(
+    cfg: &ConnConfig,
+    password: Option<&str>,
+    max_connections: u32,
+) -> Result<sqlx::PgPool> {
     let mut opts = PgConnectOptions::new()
         .host(cfg.host.as_deref().unwrap_or("localhost"))
         .port(cfg.port.unwrap_or(5432));
@@ -47,7 +51,7 @@ pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<sqlx::P
 
     // Pool preguiçoso: conexões são criadas sob demanda (servidor já validado).
     let pool = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(max_connections)
         .min_connections(1)
         // Evita um round-trip de validação a cada query (custoso via túnel SSH).
         // Em troca, recicla conexões para reduzir conexões obsoletas; um retry

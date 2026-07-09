@@ -7,7 +7,11 @@ use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode}
 use sqlx::{Column, Connection, Row, TypeInfo};
 use std::time::{Duration, Instant};
 
-pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<sqlx::MySqlPool> {
+pub async fn connect(
+    cfg: &ConnConfig,
+    password: Option<&str>,
+    max_connections: u32,
+) -> Result<sqlx::MySqlPool> {
     let mut opts = MySqlConnectOptions::new()
         .host(cfg.host.as_deref().unwrap_or("localhost"))
         .port(cfg.port.unwrap_or(3306));
@@ -44,7 +48,7 @@ pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<sqlx::M
     }
 
     let pool = MySqlPoolOptions::new()
-        .max_connections(10)
+        .max_connections(max_connections)
         .min_connections(1)
         // Evita um round-trip de validação a cada query (custoso via túnel SSH).
         // Recicla conexões para reduzir obsoletas; um retry automático cobre o resto.
