@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { api, errMessage } from "@/lib/ipc";
+import { useConnections } from "@/stores/connections";
+import { splitStatements } from "@/lib/sqlStatements";
 import type { ForeignKey, QueryResult } from "@/types";
 import type { FilterCondition } from "@/lib/query";
 
@@ -62,7 +64,9 @@ interface EditorState {
   moveTab: (draggedId: string, targetId: string) => void;
   setActiveTab: (id: string) => void;
   setSql: (id: string, sql: string) => void;
-  run: (id: string) => Promise<void>;
+  run: (id: string, sqlOverride?: string) => Promise<void>;
+  /** Roda cada statement do SQL da aba, em sequência, parando no primeiro erro. */
+  runAll: (id: string) => Promise<void>;
 }
 
 type PersistedTab = Pick<
@@ -146,23 +150,24 @@ export const useEditor = create<EditorState>()(
         }));
       },
 
-      async run(id) {
+      async run(id, sqlOverride) {
         const tab = get().tabs.find((t) => t.id === id);
-        if (!tab || tab.running || !tab.sql.trim()) return;
+        const sql = sqlOverride ?? tab?.sql ?? "";
+        if (!tab || tab.running || !sql.trim()) return;
 
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === id ? { ...t, running: true, error: null } : t)),
         }));
 
         try {
-          const result = await api.runQuery(tab.connId, tab.sql);
+          const result = await api.runQuery(tab.connId, sql);
           set((s) => ({
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, result, running: false } : t)),
             history: [
               {
                 id: crypto.randomUUID(),
                 connId: tab.connId,
-                sql: tab.sql,
+                sql,
                 ok: true,
                 elapsedMs: result.elapsedMs,
                 rows: result.rows.length,
@@ -179,7 +184,7 @@ export const useEditor = create<EditorState>()(
               {
                 id: crypto.randomUUID(),
                 connId: tab.connId,
-                sql: tab.sql,
+                sql,
                 ok: false,
                 elapsedMs: 0,
                 rows: 0,
@@ -189,6 +194,64 @@ export const useEditor = create<EditorState>()(
             ].slice(0, 200),
           }));
         }
+      },
+
+      async runAll(id) {
+        const tab = get().tabs.find((t) => t.id === id);
+        if (!tab || tab.running) return;
+        const kind =
+          useConnections.getState().connections.find((c) => c.id === tab.connId)?.kind ??
+          "postgres";
+        const statements = splitStatements(tab.sql, kind);
+        if (!statements.length) return;
+
+        set((s) => ({
+          tabs: s.tabs.map((t) => (t.id === id ? { ...t, running: true, error: null } : t)),
+        }));
+
+        const newHistory: HistoryEntry[] = [];
+        let lastResult: QueryResult | null = null;
+        let failure: { index: number; message: string } | null = null;
+
+        for (let i = 0; i < statements.length; i++) {
+          const stmt = statements[i];
+          try {
+            const result = await api.runQuery(tab.connId, stmt.text);
+            lastResult = result;
+            newHistory.unshift({
+              id: crypto.randomUUID(),
+              connId: tab.connId,
+              sql: stmt.text,
+              ok: true,
+              elapsedMs: result.elapsedMs,
+              rows: result.rows.length,
+              at: Date.now(),
+            });
+          } catch (e) {
+            newHistory.unshift({
+              id: crypto.randomUUID(),
+              connId: tab.connId,
+              sql: stmt.text,
+              ok: false,
+              elapsedMs: 0,
+              rows: 0,
+              at: Date.now(),
+            });
+            failure = { index: i, message: errMessage(e) };
+            break;
+          }
+        }
+
+        const error = failure
+          ? `statement ${failure.index + 1}/${statements.length} falhou: ${failure.message}`
+          : null;
+
+        set((s) => ({
+          tabs: s.tabs.map((t) =>
+            t.id === id ? { ...t, result: error ? null : lastResult, error, running: false } : t,
+          ),
+          history: [...newHistory, ...s.history].slice(0, 200),
+        }));
       },
     }),
     {
