@@ -70,6 +70,24 @@ impl From<russh::Error> for AppError {
     }
 }
 
+impl AppError {
+    // sqlx wraps disconnects as a generic error; matched by message substring since there's no dedicated variant.
+    pub fn is_connection_lost(&self) -> bool {
+        let AppError::Database(m) = self else {
+            return false;
+        };
+        let m = m.to_ascii_lowercase();
+        m.contains("error communicating with database")
+            || m.contains("expected to read")
+            || m.contains("unexpected end of file")
+            || m.contains("eof")
+            || m.contains("connection reset")
+            || m.contains("broken pipe")
+            || m.contains("connection closed")
+            || m.contains("closed the connection")
+    }
+}
+
 impl Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

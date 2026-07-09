@@ -2,6 +2,7 @@
 //! `ConnectionManager` e a camada de drivers.
 
 use crate::connection::ConnectionManager;
+use crate::drivers::AnyPool;
 use crate::edits;
 use crate::error::{AppError, Result};
 use crate::introspection;
@@ -9,8 +10,34 @@ use crate::models::{
     ColumnMeta, ConnConfig, ConnInput, EditResult, ForeignKey, QueryResult, RowEdit, SchemaInfo,
     TableColumns, TableInfo,
 };
+use std::future::Future;
+use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
+
+// Second failure after reconnect: surface a generic message instead of the raw driver error.
+async fn with_reconnect<T, F, Fut>(mgr: &ConnectionManager, id: &str, op: F) -> Result<T>
+where
+    F: Fn(Arc<AnyPool>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let pool = mgr.get_pool(id).await?;
+    match op(pool).await {
+        Err(e) if e.is_connection_lost() => {
+            let pool = mgr
+                .reconnect(id)
+                .await
+                .map_err(|_| AppError::Database("Connection lost".into()))?;
+            match op(pool).await {
+                Err(e) if e.is_connection_lost() => {
+                    Err(AppError::Database("Connection lost".into()))
+                }
+                other => other,
+            }
+        }
+        other => other,
+    }
+}
 
 #[tauri::command]
 pub fn list_connections(mgr: State<'_, ConnectionManager>) -> Result<Vec<ConnConfig>> {
@@ -54,14 +81,19 @@ pub async fn run_query(
     id: String,
     sql: String,
 ) -> Result<QueryResult> {
-    let pool = mgr.get_pool(&id).await?;
-    pool.execute(&sql).await
+    with_reconnect(&mgr, &id, move |pool| {
+        let sql = sql.clone();
+        async move { pool.execute(&sql).await }
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn get_schemas(mgr: State<'_, ConnectionManager>, id: String) -> Result<Vec<SchemaInfo>> {
-    let pool = mgr.get_pool(&id).await?;
-    introspection::list_schemas(&pool).await
+    with_reconnect(&mgr, &id, |pool| async move {
+        introspection::list_schemas(&pool).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -70,8 +102,11 @@ pub async fn get_tables(
     id: String,
     schema: String,
 ) -> Result<Vec<TableInfo>> {
-    let pool = mgr.get_pool(&id).await?;
-    introspection::list_tables(&pool, &schema).await
+    with_reconnect(&mgr, &id, move |pool| {
+        let schema = schema.clone();
+        async move { introspection::list_tables(&pool, &schema).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -81,8 +116,12 @@ pub async fn get_columns(
     schema: String,
     table: String,
 ) -> Result<Vec<ColumnMeta>> {
-    let pool = mgr.get_pool(&id).await?;
-    introspection::list_columns(&pool, &schema, &table).await
+    with_reconnect(&mgr, &id, move |pool| {
+        let schema = schema.clone();
+        let table = table.clone();
+        async move { introspection::list_columns(&pool, &schema, &table).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -91,8 +130,11 @@ pub async fn get_schema_columns(
     id: String,
     schema: String,
 ) -> Result<Vec<TableColumns>> {
-    let pool = mgr.get_pool(&id).await?;
-    introspection::list_all_columns(&pool, &schema).await
+    with_reconnect(&mgr, &id, move |pool| {
+        let schema = schema.clone();
+        async move { introspection::list_all_columns(&pool, &schema).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -101,8 +143,11 @@ pub async fn get_foreign_keys(
     id: String,
     schema: String,
 ) -> Result<Vec<ForeignKey>> {
-    let pool = mgr.get_pool(&id).await?;
-    introspection::list_foreign_keys(&pool, &schema).await
+    with_reconnect(&mgr, &id, move |pool| {
+        let schema = schema.clone();
+        async move { introspection::list_foreign_keys(&pool, &schema).await }
+    })
+    .await
 }
 
 /// Abre um diálogo nativo "salvar como" e grava o conteúdo (CSV, JSON, etc.). O
@@ -141,12 +186,15 @@ pub async fn apply_edits(
     id: String,
     changes: Vec<RowEdit>,
 ) -> Result<EditResult> {
-    let pool = mgr.get_pool(&id).await?;
-    let kind = pool.kind();
+    let kind = mgr.get_pool(&id).await?.kind();
     let statements: Vec<String> = changes
         .iter()
         .map(|e| edits::build_sql(kind, e))
         .collect::<Result<_>>()?;
-    let affected = pool.execute_tx(&statements).await?;
+    let affected = with_reconnect(&mgr, &id, move |pool| {
+        let statements = statements.clone();
+        async move { pool.execute_tx(&statements).await }
+    })
+    .await?;
     Ok(EditResult { affected })
 }
