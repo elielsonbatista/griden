@@ -24,12 +24,21 @@ pub enum AnyPool {
 }
 
 impl AnyPool {
-    /// Abre uma conexão de acordo com o tipo de banco.
-    pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<Self> {
+    /// Abre uma conexão de acordo com o tipo de banco. `max_connections` só se
+    /// aplica a pg/mysql/sqlite (mssql já é uma conexão única).
+    pub async fn connect(
+        cfg: &ConnConfig,
+        password: Option<&str>,
+        max_connections: u32,
+    ) -> Result<Self> {
         Ok(match cfg.kind {
-            DbKind::Postgres => AnyPool::Postgres(postgres::connect(cfg, password).await?),
-            DbKind::Mysql => AnyPool::Mysql(mysql::connect(cfg, password).await?),
-            DbKind::Sqlite => AnyPool::Sqlite(sqlite::connect(cfg, password).await?),
+            DbKind::Postgres => {
+                AnyPool::Postgres(postgres::connect(cfg, password, max_connections).await?)
+            }
+            DbKind::Mysql => AnyPool::Mysql(mysql::connect(cfg, password, max_connections).await?),
+            DbKind::Sqlite => {
+                AnyPool::Sqlite(sqlite::connect(cfg, password, max_connections).await?)
+            }
             DbKind::Mssql => {
                 AnyPool::Mssql(Arc::new(Mutex::new(mssql::connect(cfg, password).await?)))
             }

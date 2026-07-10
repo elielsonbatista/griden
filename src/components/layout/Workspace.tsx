@@ -14,6 +14,7 @@ import {
   Download,
   ChevronDown,
   Filter,
+  Copy,
 } from "lucide-react";
 import { toCsv, toJson, toTsv, toMarkdown } from "@/lib/export";
 import { FilterBar, emptyFilterRow, type FilterRow } from "@/components/results/FilterBar";
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Cell, QueryResult } from "@/types";
 import { openTableTab } from "@/lib/tableTab";
+import { shortcutLabel } from "@/lib/platform";
 
 const DOWNLOAD_FORMATS: {
   label: string;
@@ -42,10 +44,10 @@ const DOWNLOAD_FORMATS: {
 ];
 import { useConnections } from "@/stores/connections";
 import { useEditor } from "@/stores/editor";
-import { SqlEditor } from "@/components/editor/SqlEditor";
+import { SqlEditor, type SqlEditorHandle } from "@/components/editor/SqlEditor";
 import { ResultsGrid } from "@/components/results/ResultsGrid";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
-import { lazy, Suspense, memo, useMemo, useEffect, useState } from "react";
+import { lazy, Suspense, memo, useMemo, useEffect, useRef, useState } from "react";
 
 // ERD carrega react-flow + elkjs (pesados) só quando aberto.
 const ErdView = lazy(() =>
@@ -255,33 +257,57 @@ function EditorPane({
   const connName = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.connName ?? "");
   const setSql = useEditor((s) => s.setSql);
   const run = useEditor((s) => s.run);
+  const runAll = useEditor((s) => s.runAll);
+  const sqlEditorRef = useRef<SqlEditorHandle>(null);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-2">
         {leading}
-        <Button
-          size="sm"
-          className="h-7 gap-1"
-          disabled={running || !sql.trim()}
-          onClick={() => run(tabId)}
-        >
-          {running ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Play className="h-3.5 w-3.5" />
-          )}
-          Executar
-        </Button>
-        <span className="text-xs text-muted-foreground">{connName} · ⌘/Ctrl+Enter</span>
+        <div className="flex h-7 items-stretch">
+          <Button
+            size="sm"
+            className="h-7 gap-1 rounded-r-none"
+            disabled={running || !sql.trim()}
+            onClick={() => sqlEditorRef.current?.runCurrent()}
+          >
+            {running ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            Executar
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                className="h-7 w-6 rounded-l-none border-l px-0"
+                disabled={running || !sql.trim()}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => sqlEditorRef.current?.runAll()}>
+                Executar tudo
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {connName} · {shortcutLabel("Enter")} · {shortcutLabel("Shift", "Enter")} (Executar tudo)
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         <SqlEditor
+          ref={sqlEditorRef}
           connId={connId}
           kind={kind}
           value={sql}
           onChange={(v) => setSql(tabId, v)}
-          onRun={() => run(tabId)}
+          onRun={(stmt) => run(tabId, stmt)}
+          onRunAll={() => runAll(tabId)}
         />
       </div>
     </div>
@@ -453,9 +479,19 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
       </div>
       <div className="min-h-0 flex-1">
         {error ? (
-          <pre className="m-3 overflow-auto rounded-md bg-destructive/10 p-3 text-xs text-destructive">
-            {error}
-          </pre>
+          <div className="relative m-3 overflow-auto rounded-md bg-destructive/10 p-3 pr-9 text-xs text-destructive">
+            <button
+              className="absolute top-2 right-2 text-destructive/70 hover:text-destructive"
+              title="Copiar erro"
+              onClick={async () => {
+                await navigator.clipboard.writeText(error);
+                toast.success("Erro copiado");
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+            <pre className="break-words whitespace-pre-wrap">{error}</pre>
+          </div>
         ) : hasGrid ? (
           <ResultsGrid
             result={result!}

@@ -8,7 +8,11 @@ use sqlx::{Column, Row, TypeInfo};
 use std::str::FromStr;
 use std::time::Instant;
 
-pub async fn connect(cfg: &ConnConfig, _password: Option<&str>) -> Result<sqlx::SqlitePool> {
+pub async fn connect(
+    cfg: &ConnConfig,
+    _password: Option<&str>,
+    max_connections: u32,
+) -> Result<sqlx::SqlitePool> {
     let path = cfg.database.as_deref().ok_or_else(|| {
         crate::error::AppError::InvalidConfig("caminho do arquivo SQLite ausente".into())
     })?;
@@ -18,7 +22,7 @@ pub async fn connect(cfg: &ConnConfig, _password: Option<&str>) -> Result<sqlx::
         .create_if_missing(false);
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(max_connections)
         .acquire_timeout(std::time::Duration::from_secs(60))
         .connect_with(opts)
         .await?;
@@ -103,7 +107,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_ping_and_query_sqlite() {
-        let pool = AnyPool::connect(&sample_cfg(), None)
+        let pool = AnyPool::connect(&sample_cfg(), None, 5)
             .await
             .expect("conectar no sqlite de exemplo");
         pool.ping().await.expect("ping");
@@ -134,7 +138,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_sqlite() {
         use crate::introspection;
-        let pool = AnyPool::connect(&sample_cfg(), None).await.unwrap();
+        let pool = AnyPool::connect(&sample_cfg(), None, 5).await.unwrap();
 
         let schemas = introspection::list_schemas(&pool).await.unwrap();
         assert_eq!(schemas.len(), 1);

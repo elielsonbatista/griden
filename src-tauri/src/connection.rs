@@ -16,6 +16,12 @@ const KEYRING_SERVICE: &str = "dev.griden.app";
 /// O túnel é encerrado ao remover a conexão (Drop).
 struct LiveConnection {
     pool: Arc<AnyPool>,
+    /// Pool de conexão única dedicado à execução de queries (run/apply_edits).
+    /// Garante que statements rodadas em sequência (ex.: Executar tudo, ou duas
+    /// execuções separadas na mesma aba) compartilhem a mesma sessão de banco —
+    /// necessário para tabelas temporárias, variáveis de sessão etc., que são
+    /// escopadas à conexão física e se perderiam ao pegar uma aleatória do pool.
+    exec_pool: Arc<AnyPool>,
     _tunnel: Option<SshTunnel>,
 }
 
@@ -112,7 +118,9 @@ impl ConnectionManager {
 
     // ---- Conexões vivas ----
 
-    /// Abre (ou reabre) a conexão e guarda o pool (e o túnel SSH, se houver).
+    /// Abre (ou reabre) a conexão: um pool compartilhado (introspecção) e um
+    /// pool de conexão única dedicado à execução de queries, ambos sobre o
+    /// mesmo túnel SSH quando houver.
     pub async fn connect(&self, id: &str) -> Result<()> {
         let config = self.get_config(id)?;
         let db_password = get_secret(id)?;
@@ -125,17 +133,24 @@ impl ConnectionManager {
             (None, None)
         };
 
-        let (pool, tunnel) = open_pool(
-            &config,
+        let (target, tunnel) = resolve_target(&config, ssh_password, ssh_passphrase).await?;
+
+        let pool = AnyPool::connect(
+            &target,
             db_password.as_deref(),
-            ssh_password,
-            ssh_passphrase,
+            shared_pool_size(config.kind),
         )
         .await?;
+        pool.ping().await?;
+
+        let exec_pool = AnyPool::connect(&target, db_password.as_deref(), EXEC_POOL_SIZE).await?;
+        exec_pool.ping().await?;
+
         self.pools.lock().await.insert(
             id.to_string(),
             LiveConnection {
-                pool,
+                pool: Arc::new(pool),
+                exec_pool: Arc::new(exec_pool),
                 _tunnel: tunnel,
             },
         );
@@ -143,10 +158,9 @@ impl ConnectionManager {
     }
 
     // Full reopen, not just a pool retry: a dead SSH tunnel or MSSQL's single client won't self-heal.
-    pub async fn reconnect(&self, id: &str) -> Result<Arc<AnyPool>> {
+    pub async fn reconnect(&self, id: &str) -> Result<()> {
         self.disconnect(id).await;
-        self.connect(id).await?;
-        self.get_pool(id).await
+        self.connect(id).await
     }
 
     pub async fn get_pool(&self, id: &str) -> Result<Arc<AnyPool>> {
@@ -158,9 +172,19 @@ impl ConnectionManager {
             .ok_or_else(|| AppError::NotConnected(id.to_string()))
     }
 
+    pub async fn get_exec_pool(&self, id: &str) -> Result<Arc<AnyPool>> {
+        self.pools
+            .lock()
+            .await
+            .get(id)
+            .map(|c| c.exec_pool.clone())
+            .ok_or_else(|| AppError::NotConnected(id.to_string()))
+    }
+
     pub async fn disconnect(&self, id: &str) {
         if let Some(conn) = self.pools.lock().await.remove(id) {
             conn.pool.close().await;
+            conn.exec_pool.close().await;
             // _tunnel é encerrado no Drop ao sair do escopo.
         }
     }
@@ -211,33 +235,50 @@ fn config_from_input(id: &str, input: &ConnInput) -> ConnConfig {
     }
 }
 
-/// Abre o pool, montando um túnel SSH antes quando habilitado (exceto sqlite).
+/// Abre o pool (compartilhado), montando um túnel SSH antes quando habilitado
+/// (exceto sqlite). Usado só por `test()`, que não precisa de pool dedicado.
 async fn open_pool(
     config: &ConnConfig,
     db_password: Option<&str>,
     ssh_password: Option<String>,
     ssh_passphrase: Option<String>,
 ) -> Result<(Arc<AnyPool>, Option<SshTunnel>)> {
+    let (target, tunnel) = resolve_target(config, ssh_password, ssh_passphrase).await?;
+    let pool = AnyPool::connect(&target, db_password, shared_pool_size(config.kind)).await?;
+    pool.ping().await?;
+    Ok((Arc::new(pool), tunnel))
+}
+
+/// Resolve o alvo de conexão, abrindo um túnel SSH quando habilitado (exceto
+/// sqlite) e reapontando a config para o listener local do túnel.
+async fn resolve_target(
+    config: &ConnConfig,
+    ssh_password: Option<String>,
+    ssh_passphrase: Option<String>,
+) -> Result<(ConnConfig, Option<SshTunnel>)> {
     if config.ssh_enabled && config.kind != DbKind::Sqlite {
         let target_host = config.host.clone().unwrap_or_else(|| "localhost".into());
         let target_port = config.port.unwrap_or_else(|| default_port(config.kind));
         let params = ssh_params(config, ssh_password, ssh_passphrase)?;
         let tunnel = tunnel::open(&params, &target_host, target_port).await?;
 
-        // Reaponta o driver para o listener local do túnel.
         let mut local = config.clone();
         local.host = Some("127.0.0.1".into());
         local.port = Some(tunnel.local_port());
-
-        let pool = AnyPool::connect(&local, db_password).await?;
-        pool.ping().await?;
-        Ok((Arc::new(pool), Some(tunnel)))
+        Ok((local, Some(tunnel)))
     } else {
-        let pool = AnyPool::connect(config, db_password).await?;
-        pool.ping().await?;
-        Ok((Arc::new(pool), None))
+        Ok((config.clone(), None))
     }
 }
+
+fn shared_pool_size(kind: DbKind) -> u32 {
+    match kind {
+        DbKind::Sqlite => 5,
+        DbKind::Postgres | DbKind::Mysql | DbKind::Mssql => 10,
+    }
+}
+
+const EXEC_POOL_SIZE: u32 = 1;
 
 fn ssh_params(
     config: &ConnConfig,
