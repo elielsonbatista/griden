@@ -1,9 +1,9 @@
-//! Camada de drivers de banco.
+//! Database driver layer.
 //!
-//! `AnyPool` é a abstração central: um enum sobre os pools de cada backend
-//! (sqlx para pg/mysql/sqlite, tiberius para mssql) com dispatch por variante.
-//! Toda a decodificação de linhas converte para `serde_json::Value`, deixando o
-//! resultado agnóstico de tipos estáticos.
+//! `AnyPool` is the central abstraction: an enum over each backend's pool
+//! (sqlx for pg/mysql/sqlite, tiberius for mssql) with dispatch per variant.
+//! All row decoding converts to `serde_json::Value`, keeping the result
+//! agnostic of static types.
 
 pub mod mssql;
 pub mod mysql;
@@ -15,7 +15,7 @@ use crate::models::{ConnConfig, DbKind, QueryResult};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Pool/conexão viva para uma conexão aberta.
+/// Live pool/connection for an open connection.
 pub enum AnyPool {
     Postgres(sqlx::PgPool),
     Mysql(sqlx::MySqlPool),
@@ -24,8 +24,8 @@ pub enum AnyPool {
 }
 
 impl AnyPool {
-    /// Abre uma conexão de acordo com o tipo de banco. `max_connections` só se
-    /// aplica a pg/mysql/sqlite (mssql já é uma conexão única).
+    /// Opens a connection according to the database kind. `max_connections`
+    /// only applies to pg/mysql/sqlite (mssql is already a single connection).
     pub async fn connect(
         cfg: &ConnConfig,
         password: Option<&str>,
@@ -54,7 +54,7 @@ impl AnyPool {
         }
     }
 
-    /// Verifica se a conexão está viva.
+    /// Checks whether the connection is alive.
     pub async fn ping(&self) -> Result<()> {
         match self {
             AnyPool::Postgres(p) => {
@@ -78,9 +78,9 @@ impl AnyPool {
         Ok(())
     }
 
-    /// Executa um SQL e retorna o resultado agnóstico. Tenta uma segunda vez se a
-    /// primeira falhar por conexão obsoleta (o servidor/túnel fechou a conexão
-    /// ociosa do pool); o pool descarta a morta e abre uma nova.
+    /// Executes a SQL statement and returns the agnostic result. Retries once if
+    /// the first attempt fails due to a stale connection (the server/tunnel closed
+    /// the pool's idle connection); the pool discards the dead one and opens a new one.
     pub async fn execute(&self, sql: &str) -> Result<QueryResult> {
         match self.execute_once(sql).await {
             Err(e) if e.is_connection_lost() => self.execute_once(sql).await,
@@ -100,10 +100,10 @@ impl AnyPool {
         }
     }
 
-    /// Executa vários statements numa transação, retornando o total de linhas
-    /// afetadas. Faz rollback se qualquer statement falhar. Re-tenta uma vez em
-    /// caso de conexão obsoleta — seguro porque, se a conexão caiu, a transação
-    /// não chegou a ser commitada (nada foi aplicado).
+    /// Executes several statements in a transaction, returning the total number of
+    /// affected rows. Rolls back if any statement fails. Retries once on a stale
+    /// connection — safe because, if the connection dropped, the transaction was
+    /// never committed (nothing was applied).
     pub async fn execute_tx(&self, statements: &[String]) -> Result<u64> {
         match self.execute_tx_once(statements).await {
             Err(e) if e.is_connection_lost() => self.execute_tx_once(statements).await,
@@ -159,13 +159,13 @@ impl AnyPool {
         }
     }
 
-    /// Fecha a conexão liberando recursos.
+    /// Closes the connection, releasing resources.
     pub async fn close(&self) {
         match self {
             AnyPool::Postgres(p) => p.close().await,
             AnyPool::Mysql(p) => p.close().await,
             AnyPool::Sqlite(p) => p.close().await,
-            AnyPool::Mssql(_) => { /* tiberius fecha no drop */ }
+            AnyPool::Mssql(_) => { /* tiberius closes on drop */ }
         }
     }
 }

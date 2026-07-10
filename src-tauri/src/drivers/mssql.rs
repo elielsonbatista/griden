@@ -1,7 +1,7 @@
-//! Driver Microsoft SQL Server via tiberius.
+//! Microsoft SQL Server driver via tiberius.
 //!
-//! tiberius não possui pool nativo; mantemos um único `Client` protegido por um
-//! `Mutex` (adequado para um cliente desktop). As queries serializam por conexão.
+//! tiberius has no native pool; we keep a single `Client` guarded by a
+//! `Mutex` (suitable for a desktop client). Queries serialize on one connection.
 
 use crate::error::Result;
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
@@ -29,10 +29,10 @@ pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<MssqlCl
     } else {
         EncryptionLevel::NotSupported
     });
-    // Confia em certificados auto-assinados (comum em ambientes de dev/local).
+    // Trusts self-signed certificates (common in dev/local environments).
     config.trust_cert();
 
-    // Timeout cobre host inalcançável; "connection refused" já falha na hora.
+    // The timeout covers an unreachable host; "connection refused" fails immediately.
     let connect = async {
         let tcp = TcpStream::connect(config.get_addr()).await?;
         tcp.set_nodelay(true)?;

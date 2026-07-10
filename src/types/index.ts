@@ -1,4 +1,4 @@
-// Tipos TS espelhando os structs serde do backend Rust (src-tauri/src/models.rs).
+// TS types mirroring the serde structs of the Rust backend (src-tauri/src/models.rs).
 
 export type DbKind = "mysql" | "postgres" | "sqlite" | "mssql";
 

@@ -48,7 +48,7 @@ const KIND_LABEL: Record<ConnConfig["kind"], string> = {
   mssql: "SQL Server",
 };
 
-/** Ação de menu reutilizada pelo dropdown (3 pontos) e pelo menu de contexto. */
+/** Menu action reused by the dropdown (three dots) and the context menu. */
 interface Action {
   label: string;
   icon: LucideIcon;
@@ -66,7 +66,7 @@ async function copyText(text: string, label = "Copiado para a área de transfer�
   }
 }
 
-/** Renderiza uma lista de ações como itens de dropdown ou de menu de contexto. */
+/** Renders a list of actions as dropdown or context menu items. */
 function MenuActions({
   actions,
   variant,
@@ -107,7 +107,7 @@ function MenuActions({
   );
 }
 
-/** Linha genérica da árvore com indentação, chevron, ícone e menu de contexto. */
+/** Generic tree row with indentation, chevron, icon, and context menu. */
 function Row({
   depth,
   expandable,
@@ -131,9 +131,9 @@ function Row({
   trailing?: React.ReactNode;
   active?: boolean;
   onClick?: () => void;
-  /** Duplo clique no label (ex.: abrir dados da tabela). */
+  /** Double click on the label (e.g. open the table's data). */
   onLabelDoubleClick?: () => void;
-  /** Quando definido, só o chevron expande/colapsa (não a linha inteira). */
+  /** When set, only the chevron expands/collapses (not the whole row). */
   onToggle?: () => void;
   menu?: Action[];
 }) {
@@ -239,7 +239,7 @@ function ConnectionNode({
     }
     if (!isConnected) {
       await connect(conn.id);
-      if (!useConnections.getState().connected.has(conn.id)) return; // falhou
+      if (!useConnections.getState().connected.has(conn.id)) return; // failed
     }
     setExpanded(true);
     if (schemas === null) await loadSchemas();
@@ -260,7 +260,7 @@ function ConnectionNode({
     await loadSchemas();
   }
 
-  // Mesmas ações no dropdown (3 pontos) e no menu de contexto (clique direito).
+  // Same actions in the dropdown (three dots) and the context menu (right click).
   const actions: Action[] = [
     isConnected
       ? { label: "Desconectar", icon: PlugZap, onSelect: disconnectAndCollapse }

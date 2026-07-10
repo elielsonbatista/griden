@@ -35,8 +35,8 @@ import {
 import { Loader2, Network } from "lucide-react";
 import { toast } from "sonner";
 
-// Roda o layout do elk num Web Worker para não travar a thread principal
-// (importante em schemas grandes, ex.: 160+ tabelas).
+// Runs the elk layout in a Web Worker so it doesn't block the main thread
+// (important for large schemas, e.g. 160+ tables).
 const elk = new ELK({ workerFactory: () => new Worker(elkWorkerUrl) });
 
 const nodeTypes = { table: TableErdNode };
@@ -68,11 +68,11 @@ export function ErdView() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [loading, setLoading] = useState(false);
-  // Incrementa a cada (re)carregamento do diagrama; sinaliza ao canvas para
-  // reajustar a visualização sem refazer fitView em cada arraste do usuário.
+  // Incremented on every (re)load of the diagram; signals the canvas to
+  // readjust the view without redoing fitView on every user drag.
   const [version, setVersion] = useState(0);
 
-  // Carrega schemas quando a conexão muda.
+  // Load schemas when the connection changes.
   useEffect(() => {
     if (!conn) return;
     let alive = true;
@@ -94,8 +94,8 @@ export function ErdView() {
     if (!conn || !schema) return;
     setLoading(true);
     try {
-      // Uma única query traz as colunas de todas as tabelas (evita N+1 e
-      // esgotamento do pool em schemas grandes).
+      // A single query fetches the columns of all tables (avoids N+1 and
+      // pool exhaustion on large schemas).
       const [tableColumns, fks] = await Promise.all([
         api.getSchemaColumns(conn.id, schema),
         api.getForeignKeys(conn.id, schema),
@@ -131,7 +131,7 @@ export function ErdView() {
           style: { stroke: "var(--color-primary)" },
         }));
 
-      // Layout com elk.
+      // Layout with elk.
       const graph = {
         id: "root",
         layoutOptions: ELK_OPTS,
@@ -217,8 +217,8 @@ export function ErdView() {
 }
 
 /**
- * Canvas do React Flow. Reajusta o zoom/posição (fitView) sempre que os nós são
- * (re)carregados e medidos — centralizando e mostrando o máximo de itens possível.
+ * React Flow canvas. Readjusts the zoom/position (fitView) whenever the nodes are
+ * (re)loaded and measured — centering and showing as many items as possible.
  */
 function ErdCanvas({
   nodes,
@@ -236,9 +236,9 @@ function ErdCanvas({
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
 
-  // Reenquadra apenas quando um novo diagrama é carregado (version muda) e os
-  // nós já foram medidos (nodesInitialized) — não a cada arraste/zoom do usuário.
-  // Sem animação quando há muitos nós (animar centenas de nós trava).
+  // Reframes only when a new diagram is loaded (version changes) and the
+  // nodes have already been measured (nodesInitialized) — not on every user drag/zoom.
+  // No animation when there are many nodes (animating hundreds of nodes stutters).
   useEffect(() => {
     if (nodesInitialized) {
       const duration = nodes.length > 120 ? 0 : 400;
@@ -256,8 +256,8 @@ function ErdCanvas({
       nodeTypes={nodeTypes}
       fitView
       minZoom={0.05}
-      // Renderiza apenas os nós visíveis no viewport — essencial para grafos
-      // grandes (React Flow não virtualiza nós por padrão).
+      // Renders only the nodes visible in the viewport — essential for large
+      // graphs (React Flow doesn't virtualize nodes by default).
       onlyRenderVisibleElements
       proOptions={{ hideAttribution: true }}
     >

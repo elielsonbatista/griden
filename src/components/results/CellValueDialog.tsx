@@ -30,7 +30,7 @@ const editorTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
 });
 
-/** Decide a representação inicial do valor e se é JSON (objeto/array). */
+/** Decides the initial representation of the value and whether it's JSON (object/array). */
 function analyze(value: Cell): { text: string; isJson: boolean } {
   if (value !== null && typeof value === "object") {
     return { text: JSON.stringify(value, null, 2), isJson: true };
@@ -44,7 +44,7 @@ function analyze(value: Cell): { text: string; isJson: boolean } {
           return { text: JSON.stringify(parsed, null, 2), isJson: true };
         }
       } catch {
-        /* não é JSON válido */
+        /* not valid JSON */
       }
     }
     return { text: value, isJson: false };
@@ -65,7 +65,7 @@ export function CellValueDialog({
   column: string;
   value: Cell;
   editable: boolean;
-  /** Aplica a alteração pendente (sem rodar query). Para JSON, recebe já minificado. */
+  /** Applies the pending change (without running a query). For JSON, receives it already minified. */
   onApply: (next: string) => void;
 }) {
   const analyzed = useMemo(() => analyze(value), [value]);
@@ -91,7 +91,7 @@ export function CellValueDialog({
   function handleApply() {
     if (analyzed.isJson) {
       try {
-        onApply(JSON.stringify(JSON.parse(text))); // minifica antes de aplicar
+        onApply(JSON.stringify(JSON.parse(text))); // minify before applying
       } catch {
         toast.error("JSON inválido");
         return;

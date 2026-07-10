@@ -1,4 +1,4 @@
-//! Driver PostgreSQL via sqlx.
+//! PostgreSQL driver via sqlx.
 
 use crate::error::{AppError, Result};
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
@@ -24,18 +24,18 @@ pub async fn connect(
     if let Some(pw) = password {
         opts = opts.password(pw);
     }
-    // SSL marcado => exige TLS (sem verificar hostname, ok via túnel).
-    // SSL desmarcado => desliga TLS de fato (não apenas "prefer"), evitando
-    // HandshakeFailure quando se conecta em texto puro (ex.: por túnel SSH).
+    // SSL checked => requires TLS (without verifying the hostname, fine via a tunnel).
+    // SSL unchecked => actually disables TLS (not just "prefer"), avoiding a
+    // HandshakeFailure when connecting over plaintext (e.g. through an SSH tunnel).
     opts = opts.ssl_mode(if cfg.ssl {
         sqlx::postgres::PgSslMode::Require
     } else {
         sqlx::postgres::PgSslMode::Disable
     });
 
-    // Sondagem: uma única conexão que falha rápido em "connection refused".
-    // (O pool, sozinho, re-tentaria até o acquire_timeout — daí o loading longo.)
-    // O timeout cobre o caso de host inalcançável (SYN sem resposta).
+    // Probe: a single connection that fails fast on "connection refused".
+    // (The pool on its own would retry until acquire_timeout — hence the long loading.)
+    // The timeout covers the case of an unreachable host (SYN with no response).
     let probe = sqlx::PgConnection::connect_with(&opts);
     match tokio::time::timeout(Duration::from_secs(10), probe).await {
         Ok(Ok(conn)) => {
@@ -49,13 +49,13 @@ pub async fn connect(
         }
     }
 
-    // Pool preguiçoso: conexões são criadas sob demanda (servidor já validado).
+    // Lazy pool: connections are created on demand (the server is already validated).
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
-        // Evita um round-trip de validação a cada query (custoso via túnel SSH).
-        // Em troca, recicla conexões para reduzir conexões obsoletas; um retry
-        // automático (AnyPool::execute) cobre as que ainda escaparem.
+        // Avoids a validation round-trip on every query (costly over an SSH tunnel).
+        // In exchange, recycles connections to reduce stale ones; an automatic
+        // retry (AnyPool::execute) covers any that still slip through.
         .test_before_acquire(false)
         .max_lifetime(Duration::from_secs(1800))
         .idle_timeout(Duration::from_secs(300))
@@ -124,7 +124,7 @@ fn cell_to_json(row: &PgRow, idx: usize) -> Value {
             Ok(Some(bytes)) => Value::String(format!("\\x{}", hex(&bytes))),
             _ => Value::Null,
         },
-        // TEXT, VARCHAR, BPCHAR, NAME, e desconhecidos: tenta string.
+        // TEXT, VARCHAR, BPCHAR, NAME, and unknowns: try string.
         _ => json_string_opt(row.try_get::<Option<String>, _>(idx)),
     }
 }

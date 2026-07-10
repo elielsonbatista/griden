@@ -1,47 +1,47 @@
-# Contribuindo com o Griden
+# Contributing to Griden
 
-Obrigado pelo interesse em contribuir! 🎉
+Thanks for your interest in contributing! 🎉
 
-## Ambiente
+## Environment
 
-Pré-requisitos:
+Prerequisites:
 
-- Node 20+ e [pnpm](https://pnpm.io) (`corepack enable`)
-- Rust estável + cargo
-- Dependências de sistema do Tauri: <https://tauri.app/start/prerequisites/>
-  (no Ubuntu/Debian: `webkit2gtk-4.1`, `librsvg2-dev`, `build-essential`, etc.)
+- Node 20+ and [pnpm](https://pnpm.io) (`corepack enable`)
+- Stable Rust + cargo
+- Tauri system dependencies: <https://tauri.app/start/prerequisites/>
+  (on Ubuntu/Debian: `webkit2gtk-4.1`, `librsvg2-dev`, `build-essential`, etc.)
 
 ```bash
 pnpm install
 pnpm tauri dev
 ```
 
-## Layout do projeto
+## Project layout
 
-- `src/` — frontend React (Vite + Tailwind + shadcn).
-  - `components/` — UI por área (`connections`, `explorer`, `editor`, `results`, `erd`).
-  - `stores/` — estado global (Zustand).
-  - `lib/ipc.ts` — wrappers tipados sobre os comandos Tauri.
-  - `types/` — tipos espelhando os structs Rust.
-- `src-tauri/src/` — backend Rust.
-  - `drivers/` — `AnyPool` + um arquivo por backend (pg/mysql/sqlite/mssql).
-  - `introspection.rs` — metadados de schema e foreign keys por dialeto.
-  - `edits.rs` — geração de SQL para edição inline.
-  - `connection.rs` — gerenciador de conexões + keychain + túnel SSH.
-  - `tunnel.rs` — túnel SSH (port-forwarding via russh) para conexões over SSH.
-  - `commands/` — comandos `#[tauri::command]`.
+- `src/` — React frontend (Vite + Tailwind + shadcn).
+  - `components/` — UI by area (`connections`, `explorer`, `editor`, `results`, `erd`).
+  - `stores/` — global state (Zustand).
+  - `lib/ipc.ts` — typed wrappers over the Tauri commands.
+  - `types/` — types mirroring the Rust structs.
+- `src-tauri/src/` — Rust backend.
+  - `drivers/` — `AnyPool` + one file per backend (pg/mysql/sqlite/mssql).
+  - `introspection.rs` — schema metadata and foreign keys per dialect.
+  - `edits.rs` — SQL generation for inline editing.
+  - `connection.rs` — connection manager + keychain + SSH tunnel.
+  - `tunnel.rs` — SSH tunnel (port-forwarding via russh) for connections over SSH.
+  - `commands/` — `#[tauri::command]` commands.
 
-## Antes de abrir um PR
+## Before opening a PR
 
 ```bash
 pnpm lint            # tsc --noEmit
-pnpm build           # build do frontend
+pnpm build           # frontend build
 cargo fmt --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml
 cargo test  --manifest-path src-tauri/Cargo.toml
 ```
 
-Os testes do backend usam um banco SQLite de exemplo. Gere-o com:
+The backend tests use a sample SQLite database. Generate it with:
 
 ```bash
 python3 - <<'PY'
@@ -61,15 +61,15 @@ c.commit(); c.close()
 PY
 ```
 
-## Adicionando suporte a um novo banco
+## Adding support for a new database
 
-1. Crie `src-tauri/src/drivers/<novo>.rs` com `connect` e `execute` (decode → `serde_json::Value`).
-2. Adicione a variante em `AnyPool` (`drivers/mod.rs`) e em `DbKind` (`models.rs`).
-3. Implemente as queries de introspecção em `introspection.rs`.
-4. Trate o quoting de identificadores em `edits.rs`.
-5. Adicione o tipo no frontend (`src/types/index.ts`, `DB_KINDS`).
+1. Create `src-tauri/src/drivers/<new>.rs` with `connect` and `execute` (decode → `serde_json::Value`).
+2. Add the variant to `AnyPool` (`drivers/mod.rs`) and to `DbKind` (`models.rs`).
+3. Implement the introspection queries in `introspection.rs`.
+4. Handle identifier quoting in `edits.rs`.
+5. Add the type on the frontend (`src/types/index.ts`, `DB_KINDS`).
 
-## Licença
+## License
 
-Ao contribuir, você concorda em licenciar sua contribuição sob os termos
-MIT OR Apache-2.0 do projeto.
+By contributing, you agree to license your contribution under the project's
+MIT OR Apache-2.0 terms.

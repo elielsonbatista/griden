@@ -76,11 +76,11 @@ export function ResultsGrid({
   const [inserts, setInserts] = useState<Record<string, Cell>[]>([]);
   const [editing, setEditing] = useState<EditingCell>(null);
   const [saving, setSaving] = useState(false);
-  // Célula sob o cursor no clique direito (um único menu de contexto p/ todo o grid).
+  // Cell under the cursor on right click (a single context menu for the whole grid).
   const [menuTarget, setMenuTarget] = useState<{ rowIdx: number; col: string } | null>(
     null,
   );
-  // Célula exibida no dialog de valor (para valores longos / JSON).
+  // Cell shown in the value dialog (for long values / JSON).
   const [valueDialog, setValueDialog] = useState<{ rowIdx: number; col: string } | null>(
     null,
   );
@@ -95,7 +95,7 @@ export function ResultsGrid({
   const canEdit = !!editable;
   const totalWidth = result.columns.length * COL_WIDTH + NUM_COL;
 
-  // Coluna -> FK que a contém (primeira que casar). Habilita navegar a referência.
+  // Column -> FK that contains it (first match). Enables navigating to the reference.
   const fkByColumn = useMemo(() => {
     const m = new Map<string, ForeignKey>();
     for (const fk of foreignKeys ?? []) {
@@ -139,8 +139,8 @@ export function ResultsGrid({
       setEdits((prev) => {
         const m = new Map(prev);
         const row = new Map(m.get(index) ?? []);
-        // Sem alteração se o texto bate com a representação do valor original
-        // (cobre NULL -> "", JSON -> objeto, números, etc.). Também reverte edição.
+        // No change if the text matches the representation of the original value
+        // (covers NULL -> "", JSON -> object, numbers, etc.). Also reverts an edit.
         if (value === formatCell(original)) {
           row.delete(col);
         } else {
@@ -182,7 +182,7 @@ export function ResultsGrid({
     });
   }
 
-  /** Aplica um valor (string) como edição pendente — sem rodar query. */
+  /** Applies a value (string) as a pending edit — without running a query. */
   function setCellValue(rowIdx: number, col: string, value: string) {
     const original = result.rows[rowIdx][colIndex.get(col)!];
     setEdits((prev) => {
@@ -210,7 +210,7 @@ export function ResultsGrid({
     );
   }
 
-  // Identifica a célula sob o cursor (via data-attributes) antes do menu abrir.
+  // Identifies the cell under the cursor (via data-attributes) before the menu opens.
   function onCellContextMenu(e: React.MouseEvent) {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
     if (el?.dataset.row != null && el.dataset.col != null) {
@@ -529,7 +529,7 @@ interface DataCellProps {
   onStartEdit?: () => void;
   onCommit?: (v: string) => void;
   onCancel?: () => void;
-  /** Se definido, a célula é uma FK e mostra um botão para abrir a referência. */
+  /** If set, the cell is an FK and shows a button to open the reference. */
   onOpenFk?: () => void;
 }
 

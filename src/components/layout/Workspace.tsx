@@ -49,7 +49,7 @@ import { ResultsGrid } from "@/components/results/ResultsGrid";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { lazy, Suspense, memo, useMemo, useEffect, useRef, useState } from "react";
 
-// ERD carrega react-flow + elkjs (pesados) só quando aberto.
+// ERD loads react-flow + elkjs (heavy) only when opened.
 const ErdView = lazy(() =>
   import("@/components/erd/ErdView").then((m) => ({ default: m.ErdView })),
 );
@@ -99,8 +99,8 @@ function EditorWorkspace() {
 
   const canOpen = !!activeConnId && connected.has(activeConnId);
 
-  // Ctrl+W (Cmd+W no macOS) fecha a aba ativa, como nos navegadores.
-  // Em fase de captura para rodar antes do CodeMirror/inputs poderem consumir o evento.
+  // Ctrl+W (Cmd+W on macOS) closes the active tab, like in browsers.
+  // In the capture phase so it runs before CodeMirror/inputs can consume the event.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
@@ -116,8 +116,8 @@ function EditorWorkspace() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  // No Linux o WebKitGTK consome Ctrl+W antes do JS; o backend intercepta e
-  // emite "close-tab". (Em mac/Windows o listener de teclado acima já resolve.)
+  // On Linux, WebKitGTK consumes Ctrl+W before the JS; the backend intercepts it
+  // and emits "close-tab". (On mac/Windows the keyboard listener above already handles it.)
   useEffect(() => {
     const unlisten = listen("close-tab", () => {
       const { activeTabId: id, closeTab: close } = useEditor.getState();
@@ -137,9 +137,9 @@ function EditorWorkspace() {
             <div
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              // Clique do meio (scroll button) fecha a aba, como nos navegadores.
+              // Middle click (scroll button) closes the tab, like in browsers.
               onMouseDown={(e) => {
-                if (e.button === 1) e.preventDefault(); // evita o autoscroll do meio
+                if (e.button === 1) e.preventDefault(); // prevents middle-click autoscroll
               }}
               onAuxClick={(e) => {
                 if (e.button === 1) {
@@ -147,13 +147,13 @@ function EditorWorkspace() {
                   closeTab(t.id);
                 }
               }}
-              // Arrastar para reordenar as abas (como nos navegadores).
+              // Drag to reorder the tabs (like in browsers).
               draggable
               onDragStart={(e) => {
                 setDraggingId(t.id);
                 e.dataTransfer.effectAllowed = "move";
-                // Necessário para o webkit (webview do Tauri) tratar o drag como
-                // válido e disparar dragenter/dragover/drop.
+                // Needed for webkit (Tauri's webview) to treat the drag as
+                // valid and fire dragenter/dragover/drop.
                 e.dataTransfer.setData("text/plain", t.id);
               }}
               onDragEnter={() => {
@@ -241,7 +241,7 @@ function TabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   );
 }
 
-/** Barra "Executar" + editor SQL. `leading` permite injetar um botão à esquerda. */
+/** "Executar" bar + SQL editor. `leading` lets you inject a button on the left. */
 function EditorPane({
   tabId,
   kind,
@@ -314,10 +314,10 @@ function EditorPane({
   );
 }
 
-/** Aba aberta a partir de uma tabela: barra de filtros + grid (com toggle p/ SQL). */
+/** Tab opened from a table: filter bar + grid (with a toggle to SQL). */
 function TableTabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   const [mode, setMode] = useState<"filter" | "sql">("filter");
-  // Condições mantidas aqui (não na FilterBar) para sobreviverem ao toggle SQL.
+  // Conditions kept here (not in FilterBar) so they survive the SQL toggle.
   const [filterRows, setFilterRows] = useState<FilterRow[]>(() => {
     const init = useEditor.getState().tabs.find((t) => t.id === tabId)?.initialFilters;
     return init && init.length
@@ -382,8 +382,8 @@ function TableTabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   );
 }
 
-// Memoizado e com seletores granulares: re-renderiza só quando o RESULTADO muda,
-// não a cada tecla digitada no editor (o grid pode ser pesado).
+// Memoized and with granular selectors: re-renders only when the RESULT changes,
+// not on every keystroke in the editor (the grid can be heavy).
 const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
   const result = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.result ?? null);
   const error = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.error ?? null);
@@ -403,8 +403,8 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
     [editableSrc, connId, hasGrid],
   );
 
-  // Abre os registros referenciados por uma FK como data view (barra de filtros),
-  // com a(s) condição(ões) da FK já pré-aplicada(s).
+  // Opens the records referenced by an FK as a data view (filter bar),
+  // with the FK condition(s) already pre-applied.
   const onOpenRelated = useMemo(
     () =>
       (target: {

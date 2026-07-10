@@ -24,9 +24,9 @@ const baseTheme = EditorView.theme({
   ".cm-gutters": { backgroundColor: "transparent", border: "none" },
 });
 
-// Referência ESTÁVEL: o @uiw/react-codemirror reconfigura todas as extensões
-// quando `basicSetup` (ou `onChange`) mudam de referência. Mantê-los estáveis
-// evita reconstruir o editor (e a extensão SQL) a cada tecla digitada.
+// STABLE reference: @uiw/react-codemirror reconfigures every extension when
+// `basicSetup` (or `onChange`) change reference. Keeping them stable avoids
+// rebuilding the editor (and the SQL extension) on every keystroke.
 const BASIC_SETUP = {
   lineNumbers: true,
   foldGutter: false,
@@ -57,13 +57,13 @@ export const SqlEditor = forwardRef<
   onRunRef.current = onRun;
   const onRunAllRef = useRef(onRunAll);
   onRunAllRef.current = onRunAll;
-  // value/kind em ref: o keymap é montado uma vez (via extensions memoizadas) e
-  // precisa sempre ler o texto/dialeto atuais, não os do momento em que foi criado.
+  // value/kind in a ref: the keymap is mounted once (via memoized extensions) and
+  // must always read the current text/dialect, not the ones from when it was created.
   const valueRef = useRef(value);
   valueRef.current = value;
   const kindRef = useRef(kind);
   kindRef.current = kind;
-  // onChange estável (via ref) para não disparar reconfiguração do editor.
+  // Stable onChange (via ref) so it doesn't trigger a reconfiguration of the editor.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const handleChange = useCallback((v: string) => onChangeRef.current(v), []);

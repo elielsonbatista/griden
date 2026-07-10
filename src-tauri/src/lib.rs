@@ -10,9 +10,9 @@ mod tunnel;
 use connection::ConnectionManager;
 use tauri::Manager;
 
-/// Procura recursivamente um `GtkHeaderBar` na subárvore de `widget`.
-/// A titlebar criada pelo tao no Wayland é um `EventBox` que contém o
-/// `HeaderBar`, então descemos pelos containers até encontrá-lo.
+/// Recursively searches for a `GtkHeaderBar` in the subtree of `widget`.
+/// The titlebar created by tao on Wayland is an `EventBox` that contains the
+/// `HeaderBar`, so we descend through the containers until we find it.
 #[cfg(target_os = "linux")]
 fn find_header_bar(widget: &gtk::Widget) -> Option<gtk::HeaderBar> {
     use gtk::prelude::*;
@@ -40,21 +40,21 @@ pub fn run() {
             let manager = ConnectionManager::new(config_dir)?;
             app.manage(manager);
 
-            // No Wayland o tao desenha sua própria titlebar (um GtkHeaderBar)
-            // com `decoration-layout` fixo ("menu:minimize,maximize,close"),
-            // ignorando tanto o `gtk-decoration-layout` quanto o button-layout
-            // do GNOME. Espelhamos `org.gnome.desktop.wm.preferences
-            // button-layout` (mesmo formato lado_esquerdo:lado_direito) direto
-            // no HeaderBar de cada janela. Em X11 não há HeaderBar próprio
-            // (titlebar() é None) e as decorações nativas já seguem o dconf,
-            // então isto vira no-op. macOS/Windows ficam intocados (cfg gate).
+            // On Wayland, tao draws its own titlebar (a GtkHeaderBar)
+            // with a fixed `decoration-layout` ("menu:minimize,maximize,close"),
+            // ignoring both `gtk-decoration-layout` and GNOME's button-layout.
+            // We mirror `org.gnome.desktop.wm.preferences button-layout` (same
+            // left_side:right_side format) directly onto each window's
+            // HeaderBar. On X11 there is no dedicated HeaderBar (titlebar() is
+            // None) and native decorations already follow dconf, so this becomes
+            // a no-op. macOS/Windows are left untouched (cfg gate).
             #[cfg(target_os = "linux")]
             {
                 use gtk::gio;
                 use gtk::prelude::*;
 
                 let layout =
-                    gio::Settings::new("org.gnome.desktop.wm.preferences").string("button-layout"); // ex.: "close,minimize,maximize:"
+                    gio::Settings::new("org.gnome.desktop.wm.preferences").string("button-layout"); // e.g. "close,minimize,maximize:"
 
                 for (_label, window) in app.webview_windows() {
                     if let Ok(gtk_window) = window.gtk_window() {
@@ -64,9 +64,9 @@ pub fn run() {
                             }
                         }
 
-                        // O WebKitGTK consome Ctrl+W antes de entregá-lo ao JS, então
-                        // interceptamos na janela: emitimos "close-tab" ao frontend e
-                        // inibimos a propagação para o webview.
+                        // WebKitGTK consumes Ctrl+W before delivering it to JS, so
+                        // we intercept it at the window: we emit "close-tab" to the
+                        // frontend and stop propagation to the webview.
                         let emit_to = window.clone();
                         gtk_window.connect_key_press_event(move |_w, ev| {
                             use gtk::gdk;

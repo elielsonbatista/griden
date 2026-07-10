@@ -1,4 +1,4 @@
-//! Driver MySQL/MariaDB via sqlx.
+//! MySQL/MariaDB driver via sqlx.
 
 use crate::error::{AppError, Result};
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
@@ -24,16 +24,16 @@ pub async fn connect(
     if let Some(pw) = password {
         opts = opts.password(pw);
     }
-    // SSL desmarcado => desliga TLS de fato (evita HandshakeFailure em texto
-    // puro, ex.: via túnel SSH). SSL marcado => exige TLS.
+    // SSL unchecked => actually disables TLS (avoids HandshakeFailure over
+    // plaintext, e.g. via an SSH tunnel). SSL checked => requires TLS.
     opts = opts.ssl_mode(if cfg.ssl {
         MySqlSslMode::Required
     } else {
         MySqlSslMode::Disabled
     });
 
-    // Sondagem: falha rápido em "connection refused" (o pool re-tentaria até o
-    // acquire_timeout). Timeout cobre host inalcançável.
+    // Probe: fails fast on "connection refused" (the pool would otherwise retry
+    // until acquire_timeout). The timeout covers an unreachable host.
     let probe = sqlx::MySqlConnection::connect_with(&opts);
     match tokio::time::timeout(Duration::from_secs(10), probe).await {
         Ok(Ok(conn)) => {
@@ -50,8 +50,8 @@ pub async fn connect(
     let pool = MySqlPoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
-        // Evita um round-trip de validação a cada query (custoso via túnel SSH).
-        // Recicla conexões para reduzir obsoletas; um retry automático cobre o resto.
+        // Avoids a validation round-trip on every query (costly over an SSH tunnel).
+        // Recycles connections to reduce stale ones; an automatic retry covers the rest.
         .test_before_acquire(false)
         .max_lifetime(Duration::from_secs(1800))
         .idle_timeout(Duration::from_secs(300))
@@ -74,7 +74,7 @@ pub async fn execute(pool: &sqlx::MySqlPool, sql: &str) -> Result<QueryResult> {
         .iter()
         .map(|c| ColumnInfo {
             name: c.name().to_string(),
-            // O sqlx reporta TINYINT(1) como "BOOLEAN"; mostramos o tipo real.
+            // sqlx reports TINYINT(1) as "BOOLEAN"; we show the real type.
             type_name: match c.type_info().name() {
                 "BOOLEAN" => "TINYINT".to_string(),
                 other => other.to_string(),
@@ -99,7 +99,7 @@ fn cell_to_json(row: &MySqlRow, idx: usize) -> Value {
     let t = row.column(idx).type_info().name().to_uppercase();
     let unsigned = t.contains("UNSIGNED");
     match t.split_whitespace().next().unwrap_or("") {
-        // TINYINT(1) chega como "BOOLEAN" no sqlx, mas é um inteiro: mostra 0/1.
+        // TINYINT(1) arrives as "BOOLEAN" in sqlx, but it is an integer: shows 0/1.
         "BOOLEAN" | "BOOL" | "TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "INTEGER" => {
             if unsigned {
                 json_opt(row.try_get::<Option<u32>, _>(idx))

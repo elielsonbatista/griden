@@ -1,5 +1,5 @@
-//! Tipo de erro central. Implementa `Serialize` para cruzar a fronteira IPC do Tauri
-//! como uma string amigável.
+//! Central error type. Implements `Serialize` to cross Tauri's IPC boundary
+//! as a friendly string.
 
 use serde::{Serialize, Serializer};
 
@@ -38,9 +38,9 @@ pub enum AppError {
 impl From<sqlx::Error> for AppError {
     fn from(e: sqlx::Error) -> Self {
         let msg = e.to_string();
-        // O alerta TLS "HandshakeFailure" é críptico: normalmente significa que o
-        // servidor não fala TLS compatível na porta usada. Em túnel SSH, o certo é
-        // desmarcar o SSL (o SSH já cifra).
+        // The "HandshakeFailure" TLS alert is cryptic: it usually means the
+        // server does not speak compatible TLS on the port in use. Over an SSH
+        // tunnel, the right move is to uncheck SSL (SSH already encrypts).
         if msg.contains("HandshakeFailure") || msg.contains("handshake") {
             return AppError::Database(format!(
                 "{msg} — falha no handshake TLS. Se estiver usando túnel SSH ou \

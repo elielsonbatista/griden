@@ -17,7 +17,7 @@ export default defineConfig(async () => ({
   },
 
   build: {
-    // ERD (react-flow + elkjs) é carregado sob demanda via lazy import.
+    // ERD (react-flow + elkjs) is loaded on demand via lazy import.
     chunkSizeWarningLimit: 2000,
   },
 

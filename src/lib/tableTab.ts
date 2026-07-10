@@ -4,10 +4,10 @@ import { buildTableQuery, defaultSelect, type FilterCondition } from "@/lib/quer
 import type { DbKind, ForeignKey } from "@/types";
 
 /**
- * Abre uma aba "data view" (barra de filtros + grid) para uma tabela. Busca a PK
- * (para edição inline) e as foreign keys (para navegação) e, opcionalmente,
- * aplica filtros iniciais (ex.: ao navegar uma FK). Usado tanto pelo duplo-clique
- * na tabela quanto pelo clique numa célula de FK.
+ * Opens a "data view" tab (filter bar + grid) for a table. Fetches the PK
+ * (for inline editing) and the foreign keys (for navigation) and, optionally,
+ * applies initial filters (e.g. when navigating an FK). Used both by
+ * double-clicking a table and by clicking an FK cell.
  */
 export async function openTableTab(params: {
   connId: string;
@@ -24,7 +24,7 @@ export async function openTableTab(params: {
     const cols = await api.getColumns(connId, schema, table);
     pkColumns = cols.filter((c) => c.isPrimaryKey).map((c) => c.name);
   } catch {
-    /* sem colunas/PK -> grid não editável */
+    /* no columns/PK -> non-editable grid */
   }
 
   let fks: ForeignKey[] = [];
@@ -32,7 +32,7 @@ export async function openTableTab(params: {
     const all = await api.getForeignKeys(connId, schema);
     fks = all.filter((f) => f.fromTable === table);
   } catch {
-    /* sem FKs */
+    /* no FKs */
   }
 
   const editable = pkColumns.length > 0 ? { schema, table, pkColumns } : undefined;

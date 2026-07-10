@@ -18,7 +18,7 @@ const DIALECTS: Record<DbKind, SQLDialect> = {
   mssql: MSSQL,
 };
 
-/** Cache de schema para autocomplete: connId -> { tabela: [colunas] }. */
+/** Schema cache for autocomplete: connId -> { table: [columns] }. */
 const schemaCache = new Map<string, Record<string, string[]>>();
 
 export function sqlExtension(
@@ -33,8 +33,8 @@ export function sqlExtension(
 }
 
 /**
- * Constrói (com cache) um mapa de tabelas->colunas para alimentar o autocomplete.
- * Percorre os schemas e tabelas; colunas são carregadas em paralelo, com limite.
+ * Builds (with caching) a table->columns map to feed the autocomplete.
+ * Walks the schemas and tables; columns are loaded in parallel, with a limit.
  */
 export async function buildSchemaMap(
   connId: string,
@@ -45,19 +45,19 @@ export async function buildSchemaMap(
   const map: Record<string, string[]> = {};
   try {
     const schemas = await api.getSchemas(connId);
-    // Uma query por schema (em vez de uma por tabela) — evita inundar o pool/túnel.
+    // One query per schema (instead of one per table) — avoids flooding the pool/tunnel.
     await Promise.all(
       schemas.map(async (s) => {
         try {
           const tables = await api.getSchemaColumns(connId, s.name);
           for (const t of tables) map[t.table] = t.columns.map((c) => c.name);
         } catch {
-          // ignora schema sem acesso
+          // ignore schema without access
         }
       }),
     );
   } catch {
-    // sem schema disponível -> apenas keywords
+    // no schema available -> keywords only
   }
   schemaCache.set(connId, map);
   return map;

@@ -9,7 +9,7 @@ import type { FilterCondition } from "@/lib/query";
 let idSeq = 1;
 let queryTitleSeq = 1;
 
-/** Contexto que torna o grid editável (aba aberta a partir de uma tabela). */
+/** Context that makes the grid editable (tab opened from a table). */
 export interface EditableSource {
   schema: string;
   table: string;
@@ -26,11 +26,11 @@ export interface QueryTab {
   error: string | null;
   running: boolean;
   editable?: EditableSource;
-  /** FKs da tabela de origem (para navegar até registros referenciados). */
+  /** FKs of the source table (to navigate to referenced records). */
   foreignKeys?: ForeignKey[];
-  /** Definido quando a aba foi aberta a partir de uma tabela/view (data view). */
+  /** Set when the tab was opened from a table/view (data view). */
   source?: { schema: string; table: string };
-  /** Filtros pré-aplicados ao abrir (ex.: navegação por foreign key). */
+  /** Filters pre-applied on open (e.g. foreign key navigation). */
   initialFilters?: FilterCondition[];
 }
 
@@ -60,12 +60,12 @@ interface EditorState {
     initialFilters?: FilterCondition[],
   ) => string;
   closeTab: (id: string) => void;
-  /** Reordena: move a aba `draggedId` para a posição de `targetId`. */
+  /** Reorders: moves the `draggedId` tab to the position of `targetId`. */
   moveTab: (draggedId: string, targetId: string) => void;
   setActiveTab: (id: string) => void;
   setSql: (id: string, sql: string) => void;
   run: (id: string, sqlOverride?: string) => Promise<void>;
-  /** Roda cada statement do SQL da aba, em sequência, parando no primeiro erro. */
+  /** Runs each statement of the tab's SQL, in sequence, stopping at the first error. */
   runAll: (id: string) => Promise<void>;
 }
 

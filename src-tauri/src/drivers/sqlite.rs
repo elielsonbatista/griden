@@ -1,4 +1,4 @@
-//! Driver SQLite via sqlx.
+//! SQLite driver via sqlx.
 
 use crate::error::Result;
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
@@ -70,7 +70,7 @@ fn cell_to_json(row: &SqliteRow, idx: usize) -> Value {
             Ok(Some(bytes)) => Value::String(format!("0x{}", hex(&bytes))),
             _ => Value::Null,
         },
-        // TEXT, NUMERIC, DATETIME, e desconhecidos: tenta string, depois i64/f64.
+        // TEXT, NUMERIC, DATETIME, and unknowns: try string, then i64/f64.
         _ => match row.try_get::<Option<String>, _>(idx) {
             Ok(Some(s)) => Value::String(s),
             Ok(None) => Value::Null,
@@ -109,7 +109,7 @@ mod tests {
     async fn connect_ping_and_query_sqlite() {
         let pool = AnyPool::connect(&sample_cfg(), None, 5)
             .await
-            .expect("conectar no sqlite de exemplo");
+            .expect("connect to sample sqlite");
         pool.ping().await.expect("ping");
 
         let res = pool
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(res.rows[0][1], serde_json::json!("Ada Lovelace"));
         assert_eq!(res.rows[0][2], serde_json::json!(1815));
 
-        // Tipos diversos: REAL e DATE.
+        // Various types: REAL and DATE.
         let books = pool
             .execute("SELECT title, price, published FROM books ORDER BY id")
             .await
@@ -153,9 +153,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cols[0].name, "id");
-        assert!(cols[0].is_primary_key, "id deve ser PK");
+        assert!(cols[0].is_primary_key, "id should be PK");
         let title = cols.iter().find(|c| c.name == "title").unwrap();
-        assert!(!title.nullable, "title é NOT NULL");
+        assert!(!title.nullable, "title is NOT NULL");
         assert!(!title.is_primary_key);
 
         // Foreign keys: books.author_id -> authors.id
@@ -165,7 +165,7 @@ mod tests {
         let fk = fks
             .iter()
             .find(|f| f.from_table == "books")
-            .expect("FK em books");
+            .expect("FK on books");
         assert_eq!(fk.to_table, "authors");
         assert_eq!(fk.from_columns, vec!["author_id".to_string()]);
         assert_eq!(fk.to_columns, vec!["id".to_string()]);

@@ -1,8 +1,8 @@
-//! Geração de SQL para edição inline (UPDATE/INSERT/DELETE).
+//! SQL generation for inline editing (UPDATE/INSERT/DELETE).
 //!
-//! Os valores são renderizados como literais SQL escapados conforme o dialeto.
-//! Aceitável para um cliente desktop onde o usuário edita o próprio banco; uma
-//! evolução futura pode migrar para queries parametrizadas.
+//! Values are rendered as SQL literals escaped according to the dialect.
+//! Acceptable for a desktop client where the user edits their own database; a
+//! future evolution may migrate to parameterized queries.
 
 use crate::error::{AppError, Result};
 use crate::models::{DbKind, EditOp, RowEdit};
@@ -28,7 +28,7 @@ fn quote_str(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// Renderiza um valor JSON como literal SQL.
+/// Renders a JSON value as a SQL literal.
 fn lit(kind: DbKind, v: &Value) -> String {
     match v {
         Value::Null => "NULL".to_string(),
@@ -42,7 +42,7 @@ fn lit(kind: DbKind, v: &Value) -> String {
     }
 }
 
-/// Gera o statement SQL para uma edição.
+/// Generates the SQL statement for an edit.
 pub fn build_sql(kind: DbKind, edit: &RowEdit) -> Result<String> {
     let qname = qualified(kind, &edit.schema, &edit.table);
 
@@ -157,11 +157,11 @@ mod tests {
 
     #[tokio::test]
     async fn apply_edits_roundtrip_sqlite() {
-        // Copia o banco de exemplo para um arquivo temporário gravável.
+        // Copies the sample database to a writable temporary file.
         let src = concat!(env!("CARGO_MANIFEST_DIR"), "/../.dev/sample.db");
         let dst = concat!(env!("CARGO_MANIFEST_DIR"), "/../.dev/edits_test.db");
         let _ = std::fs::remove_file(dst);
-        std::fs::copy(src, dst).expect("copiar db");
+        std::fs::copy(src, dst).expect("copy db");
 
         let pool = AnyPool::connect(&cfg(dst), None, 5).await.unwrap();
 
@@ -218,7 +218,7 @@ mod tests {
             .unwrap();
 
         let count = pool.execute("SELECT COUNT(*) FROM authors").await.unwrap();
-        // 2 originais (update não muda contagem), insert +1, delete -1 => 2
+        // 2 originals (update does not change the count), insert +1, delete -1 => 2
         assert_eq!(count.rows[0][0], serde_json::json!(2));
 
         pool.close().await;

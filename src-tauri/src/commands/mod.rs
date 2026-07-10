@@ -1,5 +1,5 @@
-//! Comandos Tauri expostos ao frontend. São wrappers finos sobre o
-//! `ConnectionManager` e a camada de drivers.
+//! Tauri commands exposed to the frontend. These are thin wrappers over the
+//! `ConnectionManager` and the driver layer.
 
 use crate::connection::ConnectionManager;
 use crate::drivers::AnyPool;
@@ -42,8 +42,8 @@ where
     }
 }
 
-/// Como `with_reconnect`, mas sobre o pool de conexão única dedicado à
-/// execução (`run_query`/`apply_edits`) — ver [`ConnectionManager::get_exec_pool`].
+/// Like `with_reconnect`, but over the single-connection pool dedicated to
+/// execution (`run_query`/`apply_edits`) — see [`ConnectionManager::get_exec_pool`].
 async fn with_reconnect_exec<T, F, Fut>(mgr: &ConnectionManager, id: &str, op: F) -> Result<T>
 where
     F: Fn(Arc<AnyPool>) -> Fut,
@@ -181,9 +181,9 @@ pub async fn get_foreign_keys(
     .await
 }
 
-/// Abre um diálogo nativo "salvar como" e grava o conteúdo (CSV, JSON, etc.). O
-/// filtro de arquivo é derivado da extensão de `default_name`. Retorna `false`
-/// se o usuário cancelar. O download via <a> não funciona no webview.
+/// Opens a native "save as" dialog and writes the content (CSV, JSON, etc.). The
+/// file filter is derived from the extension of `default_name`. Returns `false`
+/// if the user cancels. Downloading via <a> does not work in the webview.
 #[tauri::command]
 pub async fn save_file(app: AppHandle, default_name: String, content: String) -> Result<bool> {
     let ext = std::path::Path::new(&default_name)

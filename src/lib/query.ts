@@ -1,6 +1,6 @@
 import type { Cell, DbKind } from "@/types";
 
-/** Escapa um identificador (tabela/coluna) conforme o dialeto. */
+/** Escapes an identifier (table/column) according to the dialect. */
 export function quoteIdent(kind: DbKind, ident: string): string {
   switch (kind) {
     case "mysql":
@@ -12,20 +12,20 @@ export function quoteIdent(kind: DbKind, ident: string): string {
   }
 }
 
-/** Nome qualificado (schema.tabela), exceto sqlite que não usa schema. */
+/** Qualified name (schema.table), except sqlite which doesn't use a schema. */
 export function qualifiedName(kind: DbKind, schema: string, table: string): string {
   if (kind === "sqlite") return quoteIdent(kind, table);
   return `${quoteIdent(kind, schema)}.${quoteIdent(kind, table)}`;
 }
 
-/** SELECT padrão ao abrir uma tabela, com limite por dialeto. */
+/** Default SELECT when opening a table, with a per-dialect limit. */
 export function defaultSelect(kind: DbKind, schema: string, table: string): string {
   const t = qualifiedName(kind, schema, table);
   if (kind === "mssql") return `SELECT TOP 100 * FROM ${t}`;
   return `SELECT * FROM ${t} LIMIT 100`;
 }
 
-/** Renderiza um valor como literal SQL, escapado conforme o dialeto. */
+/** Renders a value as a SQL literal, escaped according to the dialect. */
 export function sqlLiteral(kind: DbKind, value: Cell): string {
   if (value === null) return "NULL";
   if (typeof value === "boolean") {
@@ -37,7 +37,7 @@ export function sqlLiteral(kind: DbKind, value: Cell): string {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
-// ----- Filtros da data view -----
+// ----- Data view filters -----
 
 export type FilterOp =
   | "="
@@ -72,7 +72,7 @@ export interface FilterCondition {
   value: string;
 }
 
-/** Monta `SELECT * FROM tabela [WHERE ...] LIMIT 100` a partir dos filtros. */
+/** Builds `SELECT * FROM table [WHERE ...] LIMIT 100` from the filters. */
 export function buildTableQuery(
   kind: DbKind,
   schema: string,

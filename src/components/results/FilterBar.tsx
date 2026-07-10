@@ -36,7 +36,7 @@ export function FilterBar({
   onApply: () => void;
   onToggleSql: () => void;
 }) {
-  // Limpa a coluna selecionada se ela deixar de existir (troca de tabela).
+  // Clears the selected column if it no longer exists (table switch).
   useEffect(() => {
     setRows((rs) =>
       rs.some((r) => r.column && !columns.includes(r.column))

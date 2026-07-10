@@ -1,7 +1,7 @@
 import type { QueryResult, Cell } from "@/types";
 import { formatCell } from "@/lib/format";
 
-/** Escapa um valor para formatos delimitados (CSV). */
+/** Escapes a value for delimited formats (CSV). */
 function escapeDelimited(value: Cell): string {
   const s = formatCell(value);
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -15,7 +15,7 @@ export function toCsv(result: QueryResult): string {
 }
 
 export function toTsv(result: QueryResult): string {
-  // Tab/quebras viram espaço — formato simples para colar em planilhas.
+  // Tabs/line breaks become spaces — a simple format for pasting into spreadsheets.
   const clean = (v: Cell) => formatCell(v).replace(/[\t\n\r]+/g, " ");
   const header = result.columns.map((c) => c.name).join("\t");
   const lines = result.rows.map((row) => row.map(clean).join("\t"));
@@ -23,7 +23,7 @@ export function toTsv(result: QueryResult): string {
 }
 
 export function toJson(result: QueryResult): string {
-  // Cada linha vira um objeto; valores JSON/JSONB permanecem aninhados.
+  // Each row becomes an object; JSON/JSONB values stay nested.
   const rows = result.rows.map((row) => {
     const obj: Record<string, Cell> = {};
     result.columns.forEach((c, i) => {

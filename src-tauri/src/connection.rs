@@ -1,5 +1,5 @@
-//! Gerenciamento de conexões: persistência das configs (JSON), segredos no
-//! keychain do SO, túnel SSH opcional e registro de conexões vivas.
+//! Connection management: persisting configs (JSON), secrets in the OS
+//! keychain, an optional SSH tunnel, and a registry of live connections.
 
 use crate::drivers::AnyPool;
 use crate::error::{AppError, Result};
@@ -12,27 +12,28 @@ use tokio::sync::Mutex;
 
 const KEYRING_SERVICE: &str = "dev.griden.app";
 
-/// Conexão viva: o pool do driver e, se houver, o túnel SSH que o sustenta.
-/// O túnel é encerrado ao remover a conexão (Drop).
+/// A live connection: the driver pool and, if any, the SSH tunnel backing it.
+/// The tunnel is torn down when the connection is removed (Drop).
 struct LiveConnection {
     pool: Arc<AnyPool>,
-    /// Pool de conexão única dedicado à execução de queries (run/apply_edits).
-    /// Garante que statements rodadas em sequência (ex.: Executar tudo, ou duas
-    /// execuções separadas na mesma aba) compartilhem a mesma sessão de banco —
-    /// necessário para tabelas temporárias, variáveis de sessão etc., que são
-    /// escopadas à conexão física e se perderiam ao pegar uma aleatória do pool.
+    /// Single-connection pool dedicated to query execution (run/apply_edits).
+    /// Ensures statements run in sequence (e.g. Run all, or two separate
+    /// executions in the same tab) share the same database session —
+    /// required for temporary tables, session variables, etc., which are
+    /// scoped to the physical connection and would be lost if a random one
+    /// from the pool were picked.
     exec_pool: Arc<AnyPool>,
     _tunnel: Option<SshTunnel>,
 }
 
-/// Estado gerenciado pelo Tauri.
+/// State managed by Tauri.
 pub struct ConnectionManager {
     config_path: PathBuf,
     pools: Mutex<HashMap<String, LiveConnection>>,
 }
 
 impl ConnectionManager {
-    /// Cria o gerenciador apontando para `<config_dir>/connections.json`.
+    /// Creates the manager pointing at `<config_dir>/connections.json`.
     pub fn new(config_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&config_dir)?;
         Ok(Self {
@@ -41,7 +42,7 @@ impl ConnectionManager {
         })
     }
 
-    // ---- Persistência de configs ----
+    // ---- Config persistence ----
 
     pub fn list_configs(&self) -> Result<Vec<ConnConfig>> {
         if !self.config_path.exists() {
@@ -67,8 +68,8 @@ impl ConnectionManager {
             .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))
     }
 
-    /// Cria ou atualiza uma conexão. Senhas (banco e SSH) vão para o keychain e
-    /// nunca são gravadas no arquivo de configs.
+    /// Creates or updates a connection. Passwords (database and SSH) go to the
+    /// keychain and are never written to the config file.
     pub fn save_config(&self, input: ConnInput) -> Result<ConnConfig> {
         let mut configs = self.list_configs()?;
         let id = input
@@ -116,11 +117,11 @@ impl ConnectionManager {
         Ok(())
     }
 
-    // ---- Conexões vivas ----
+    // ---- Live connections ----
 
-    /// Abre (ou reabre) a conexão: um pool compartilhado (introspecção) e um
-    /// pool de conexão única dedicado à execução de queries, ambos sobre o
-    /// mesmo túnel SSH quando houver.
+    /// Opens (or reopens) the connection: a shared pool (introspection) and a
+    /// single-connection pool dedicated to query execution, both over the
+    /// same SSH tunnel when present.
     pub async fn connect(&self, id: &str) -> Result<()> {
         let config = self.get_config(id)?;
         let db_password = get_secret(id)?;
@@ -185,7 +186,7 @@ impl ConnectionManager {
         if let Some(conn) = self.pools.lock().await.remove(id) {
             conn.pool.close().await;
             conn.exec_pool.close().await;
-            // _tunnel é encerrado no Drop ao sair do escopo.
+            // _tunnel is torn down on Drop when it goes out of scope.
         }
     }
 
@@ -193,7 +194,7 @@ impl ConnectionManager {
         self.pools.lock().await.contains_key(id)
     }
 
-    /// Testa uma config sem persistir: conecta, dá ping e fecha.
+    /// Tests a config without persisting it: connects, pings, and closes.
     pub async fn test(&self, input: &ConnInput) -> Result<()> {
         let id = input.id.clone().unwrap_or_default();
         let config = config_from_input(&id, input);
@@ -215,7 +216,7 @@ impl ConnectionManager {
     }
 }
 
-/// Monta o `ConnConfig` persistível a partir do input (sem segredos).
+/// Builds the persistable `ConnConfig` from the input (without secrets).
 fn config_from_input(id: &str, input: &ConnInput) -> ConnConfig {
     ConnConfig {
         id: id.to_string(),
@@ -235,8 +236,8 @@ fn config_from_input(id: &str, input: &ConnInput) -> ConnConfig {
     }
 }
 
-/// Abre o pool (compartilhado), montando um túnel SSH antes quando habilitado
-/// (exceto sqlite). Usado só por `test()`, que não precisa de pool dedicado.
+/// Opens the (shared) pool, setting up an SSH tunnel first when enabled
+/// (except sqlite). Used only by `test()`, which needs no dedicated pool.
 async fn open_pool(
     config: &ConnConfig,
     db_password: Option<&str>,
@@ -249,8 +250,8 @@ async fn open_pool(
     Ok((Arc::new(pool), tunnel))
 }
 
-/// Resolve o alvo de conexão, abrindo um túnel SSH quando habilitado (exceto
-/// sqlite) e reapontando a config para o listener local do túnel.
+/// Resolves the connection target, opening an SSH tunnel when enabled (except
+/// sqlite) and repointing the config at the tunnel's local listener.
 async fn resolve_target(
     config: &ConnConfig,
     ssh_password: Option<String>,
@@ -320,7 +321,7 @@ fn default_port(kind: DbKind) -> u16 {
     }
 }
 
-// ---- Keychain (segredos) ----
+// ---- Keychain (secrets) ----
 
 fn ssh_pw_account(id: &str) -> String {
     format!("{id}#ssh-password")
@@ -330,7 +331,7 @@ fn ssh_pass_account(id: &str) -> String {
     format!("{id}#ssh-passphrase")
 }
 
-/// Usa o valor informado (se não vazio) ou busca no keychain pela conta derivada do id.
+/// Uses the provided value (if non-empty) or looks it up in the keychain by the account derived from the id.
 fn resolve_secret(
     provided: &Option<String>,
     id: Option<&str>,

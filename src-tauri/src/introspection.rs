@@ -1,6 +1,6 @@
-//! Introspecção de schema por dialeto. Construída sobre `AnyPool::execute`,
-//! reaproveitando o decode dinâmico de linhas. As meta-queries recebem nomes de
-//! schema/tabela como literais; eles são escapados via `quote` para evitar injeção.
+//! Per-dialect schema introspection. Built on top of `AnyPool::execute`,
+//! reusing the dynamic row decoding. The meta-queries take schema/table names
+//! as literals; they are escaped via `quote` to prevent injection.
 
 use crate::drivers::AnyPool;
 use crate::error::Result;
@@ -10,7 +10,7 @@ use crate::models::{
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Escapa um literal de string SQL dobrando aspas simples.
+/// Escapes a SQL string literal by doubling single quotes.
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
@@ -127,10 +127,10 @@ pub async fn list_columns(pool: &AnyPool, schema: &str, table: &str) -> Result<V
 }
 
 async fn list_columns_sqlite(pool: &AnyPool, table: &str) -> Result<Vec<ColumnMeta>> {
-    // PRAGMA não aceita placeholder; o nome é aspado como literal.
+    // PRAGMA does not accept a placeholder; the name is quoted as a literal.
     let sql = format!("PRAGMA table_info({})", quote(table));
     let res = pool.execute(&sql).await?;
-    // colunas: cid, name, type, notnull, dflt_value, pk
+    // columns: cid, name, type, notnull, dflt_value, pk
     Ok(res
         .rows
         .iter()
@@ -149,7 +149,7 @@ async fn list_columns_sqlite(pool: &AnyPool, table: &str) -> Result<Vec<ColumnMe
         .collect())
 }
 
-/// Linhas no formato: name, data_type, is_nullable, default, ordinal, is_pk.
+/// Rows in the format: name, data_type, is_nullable, default, ordinal, is_pk.
 fn rows_to_columns(res: &crate::models::QueryResult) -> Vec<ColumnMeta> {
     res.rows
         .iter()
@@ -226,13 +226,13 @@ async fn list_columns_mssql(pool: &AnyPool, schema: &str, table: &str) -> Result
     Ok(rows_to_columns(&res))
 }
 
-// ----- Todas as colunas do schema numa única query (ERD) -----
+// ----- All columns of the schema in a single query (ERD) -----
 
-/// Carrega as colunas de TODAS as tabelas do schema de uma vez. Evita o N+1
-/// (uma query por tabela) que esgota o pool em schemas grandes.
+/// Loads the columns of ALL tables in the schema at once. Avoids the N+1
+/// (one query per table) that exhausts the pool on large schemas.
 pub async fn list_all_columns(pool: &AnyPool, schema: &str) -> Result<Vec<TableColumns>> {
     if pool.kind() == DbKind::Sqlite {
-        // SQLite não tem information_schema; usa PRAGMA por tabela (local e rápido).
+        // SQLite has no information_schema; uses PRAGMA per table (local and fast).
         let tables = list_tables(pool, "main").await?;
         let mut out = Vec::with_capacity(tables.len());
         for t in tables {
@@ -293,7 +293,7 @@ pub async fn list_all_columns(pool: &AnyPool, schema: &str) -> Result<Vec<TableC
     };
 
     let res = pool.execute(&sql).await?;
-    // Linhas: table_name, column_name, data_type, nullable, default, ordinal, is_pk.
+    // Rows: table_name, column_name, data_type, nullable, default, ordinal, is_pk.
     let mut order: Vec<String> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<TableColumns> = Vec::new();
@@ -373,8 +373,8 @@ pub async fn list_foreign_keys(pool: &AnyPool, schema: &str) -> Result<Vec<Forei
     Ok(group_fks(&res))
 }
 
-/// Agrupa linhas [name, from_schema, from_table, from_col, to_schema, to_table, to_col]
-/// por constraint_name, preservando a ordem das colunas.
+/// Groups rows [name, from_schema, from_table, from_col, to_schema, to_table, to_col]
+/// by constraint_name, preserving the column order.
 fn group_fks(res: &crate::models::QueryResult) -> Vec<ForeignKey> {
     let mut order: Vec<String> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -409,7 +409,7 @@ async fn list_foreign_keys_sqlite(pool: &AnyPool) -> Result<Vec<ForeignKey>> {
     for t in tables.iter().filter(|t| t.kind == TableKind::Table) {
         let sql = format!("PRAGMA foreign_key_list({})", quote(&t.name));
         let res = pool.execute(&sql).await?;
-        // colunas: id, seq, table, from, to, on_update, on_delete, match
+        // columns: id, seq, table, from, to, on_update, on_delete, match
         let mut by_id: HashMap<i64, usize> = HashMap::new();
         let mut local: Vec<ForeignKey> = Vec::new();
         for r in &res.rows {

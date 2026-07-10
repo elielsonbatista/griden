@@ -1,9 +1,9 @@
 import type { Cell } from "@/types";
 
 /**
- * Converte um valor de célula em texto para exibição/edição.
- * Objetos e arrays (colunas JSON/JSONB) são serializados com JSON.stringify
- * em vez de virarem "[object Object]".
+ * Converts a cell value into text for display/editing.
+ * Objects and arrays (JSON/JSONB columns) are serialized with JSON.stringify
+ * instead of becoming "[object Object]".
  */
 export function formatCell(value: Cell): string {
   if (value === null) return "";

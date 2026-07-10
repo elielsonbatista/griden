@@ -5,11 +5,11 @@ import { toast } from "sonner";
 
 interface ConnectionsState {
   connections: ConnConfig[];
-  /** ids atualmente conectados */
+  /** ids currently connected */
   connected: Set<string>;
-  /** id da conexão ativa (foco no explorer/editor) */
+  /** id of the active connection (focus in explorer/editor) */
   activeId: string | null;
-  /** ids com operação em andamento (connect/disconnect) */
+  /** ids with an operation in progress (connect/disconnect) */
   busy: Set<string>;
   loaded: boolean;
 
