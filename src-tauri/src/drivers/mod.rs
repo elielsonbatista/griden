@@ -74,7 +74,7 @@ impl AnyPool {
     /// ociosa do pool); o pool descarta a morta e abre uma nova.
     pub async fn execute(&self, sql: &str) -> Result<QueryResult> {
         match self.execute_once(sql).await {
-            Err(e) if is_connection_error(&e) => self.execute_once(sql).await,
+            Err(e) if e.is_connection_lost() => self.execute_once(sql).await,
             other => other,
         }
     }
@@ -97,7 +97,7 @@ impl AnyPool {
     /// não chegou a ser commitada (nada foi aplicado).
     pub async fn execute_tx(&self, statements: &[String]) -> Result<u64> {
         match self.execute_tx_once(statements).await {
-            Err(e) if is_connection_error(&e) => self.execute_tx_once(statements).await,
+            Err(e) if e.is_connection_lost() => self.execute_tx_once(statements).await,
             other => other,
         }
     }
@@ -159,23 +159,4 @@ impl AnyPool {
             AnyPool::Mssql(_) => { /* tiberius fecha no drop */ }
         }
     }
-}
-
-/// Heurística: o erro indica que a conexão foi fechada/quebrada (conexão obsoleta
-/// no pool, túnel SSH derrubado, etc.)? Nesses casos vale uma nova tentativa.
-/// O sqlx embrulha esses casos como `Error::Io` ("error communicating with database").
-fn is_connection_error(e: &crate::error::AppError) -> bool {
-    use crate::error::AppError;
-    let AppError::Database(m) = e else {
-        return false;
-    };
-    let m = m.to_ascii_lowercase();
-    m.contains("error communicating with database")
-        || m.contains("expected to read")
-        || m.contains("unexpected end of file")
-        || m.contains("eof")
-        || m.contains("connection reset")
-        || m.contains("broken pipe")
-        || m.contains("connection closed")
-        || m.contains("closed the connection")
 }

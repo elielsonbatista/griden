@@ -142,6 +142,13 @@ impl ConnectionManager {
         Ok(())
     }
 
+    // Full reopen, not just a pool retry: a dead SSH tunnel or MSSQL's single client won't self-heal.
+    pub async fn reconnect(&self, id: &str) -> Result<Arc<AnyPool>> {
+        self.disconnect(id).await;
+        self.connect(id).await?;
+        self.get_pool(id).await
+    }
+
     pub async fn get_pool(&self, id: &str) -> Result<Arc<AnyPool>> {
         self.pools
             .lock()
