@@ -340,7 +340,7 @@ export function ResultsGrid({
                 >
                   <Cellbox
                     width={NUM_COL}
-                    className="justify-between gap-0 pl-2 pr-1 text-muted-foreground/50 tabular-nums"
+                    className="justify-between gap-0 bg-muted/60 pl-2 pr-1 text-muted-foreground/50 tabular-nums"
                   >
                     <span>{rowIdx + 1}</span>
                     {canEdit && (
@@ -401,7 +401,7 @@ export function ResultsGrid({
             >
               <Cellbox
                 width={NUM_COL}
-                className="justify-between pl-2 pr-1 text-emerald-600"
+                className="justify-between bg-muted/60 pl-2 pr-1 text-emerald-600"
               >
                 <Plus className="h-3 w-3" />
                 <button
