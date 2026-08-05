@@ -62,7 +62,7 @@ async function copyText(text: string, label = "Copiado para a área de transfer�
     await navigator.clipboard.writeText(text);
     toast.success(label);
   } catch {
-    toast.error("Não foi possível copiar");
+    toast.error("Não foi possível copiar", { duration: Infinity });
   }
 }
 
@@ -225,7 +225,7 @@ function ConnectionNode({
     try {
       setSchemas(await api.getSchemas(conn.id));
     } catch (e) {
-      toast.error("Falha ao listar schemas", { description: errMessage(e) });
+      toast.error("Falha ao listar schemas", { description: errMessage(e), duration: Infinity });
     } finally {
       setLoading(false);
     }
@@ -352,7 +352,7 @@ function SchemaNode({
     try {
       setTables(await api.getTables(conn.id, schema));
     } catch (e) {
-      toast.error("Falha ao listar tabelas", { description: errMessage(e) });
+      toast.error("Falha ao listar tabelas", { description: errMessage(e), duration: Infinity });
     } finally {
       setLoading(false);
     }
@@ -427,7 +427,7 @@ function TableNode({
       try {
         setColumns(await api.getColumns(conn.id, schema, table.name));
       } catch (e) {
-        toast.error("Falha ao listar colunas", { description: errMessage(e) });
+        toast.error("Falha ao listar colunas", { description: errMessage(e), duration: Infinity });
       } finally {
         setLoading(false);
       }

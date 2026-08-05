@@ -148,7 +148,7 @@ export function ConnectionDialog({
       await api.testConnection(toInput(editing?.id, form));
       toast.success("Conexão bem-sucedida");
     } catch (e) {
-      toast.error("Falha no teste", { description: errMessage(e) });
+      toast.error("Falha no teste", { description: errMessage(e), duration: Infinity });
     } finally {
       setTesting(false);
     }
@@ -156,7 +156,7 @@ export function ConnectionDialog({
 
   async function handleSave() {
     if (!form.name.trim()) {
-      toast.error("Informe um nome para a conexão");
+      toast.error("Informe um nome para a conexão", { duration: Infinity });
       return;
     }
     setSaving(true);

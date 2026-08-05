@@ -97,6 +97,7 @@ pub fn run() {
             commands::disconnect,
             commands::is_connected,
             commands::run_query,
+            commands::cancel_query,
             commands::get_schemas,
             commands::get_tables,
             commands::get_columns,

@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Filter,
   Copy,
+  Square,
 } from "lucide-react";
 import { toCsv, toJson, toTsv, toMarkdown } from "@/lib/export";
 import { FilterBar, emptyFilterRow, type FilterRow } from "@/components/results/FilterBar";
@@ -258,26 +259,40 @@ function EditorPane({
   const setSql = useEditor((s) => s.setSql);
   const run = useEditor((s) => s.run);
   const runAll = useEditor((s) => s.runAll);
+  const cancel = useEditor((s) => s.cancel);
   const sqlEditorRef = useRef<SqlEditorHandle>(null);
+  const canStop = running && kind !== "sqlite";
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-2">
         {leading}
         <div className="flex h-7 items-stretch">
-          <Button
-            size="sm"
-            className="h-7 gap-1 rounded-r-none"
-            disabled={running || !sql.trim()}
-            onClick={() => sqlEditorRef.current?.runCurrent()}
-          >
-            {running ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            Executar
-          </Button>
+          {canStop ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 gap-1 rounded-r-none"
+              onClick={() => cancel(tabId)}
+            >
+              <Square className="h-3.5 w-3.5" />
+              Parar
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="h-7 gap-1 rounded-r-none"
+              disabled={running || !sql.trim()}
+              onClick={() => sqlEditorRef.current?.runCurrent()}
+            >
+              {running ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              Executar
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -457,7 +472,10 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
                         );
                         if (saved) toast.success(`Exportado (${fmt.label})`);
                       } catch (e) {
-                        toast.error("Falha ao exportar", { description: errMessage(e) });
+                        toast.error("Falha ao exportar", {
+                          description: errMessage(e),
+                          duration: Infinity,
+                        });
                       }
                     }}
                   >

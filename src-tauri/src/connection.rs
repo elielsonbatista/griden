@@ -23,6 +23,14 @@ struct LiveConnection {
     /// scoped to the physical connection and would be lost if a random one
     /// from the pool were picked.
     exec_pool: Arc<AnyPool>,
+    /// Identifies the exec pool's physical session, so `cancel_exec` can abort
+    /// its current statement from the (separate) shared pool. `None` when the
+    /// backend has no such concept (sqlite) or the lookup failed.
+    exec_session_id: Option<i64>,
+    /// Set by `cancel_exec` and consumed by `with_reconnect_exec`: distinguishes
+    /// a user-requested cancellation from a genuine dropped connection, so a
+    /// cancelled query isn't silently retried.
+    cancelled: bool,
     _tunnel: Option<SshTunnel>,
 }
 
@@ -146,12 +154,15 @@ impl ConnectionManager {
 
         let exec_pool = AnyPool::connect(&target, db_password.as_deref(), EXEC_POOL_SIZE).await?;
         exec_pool.ping().await?;
+        let exec_session_id = exec_pool.session_id().await;
 
         self.pools.lock().await.insert(
             id.to_string(),
             LiveConnection {
                 pool: Arc::new(pool),
                 exec_pool: Arc::new(exec_pool),
+                exec_session_id,
+                cancelled: false,
                 _tunnel: tunnel,
             },
         );
@@ -180,6 +191,47 @@ impl ConnectionManager {
             .get(id)
             .map(|c| c.exec_pool.clone())
             .ok_or_else(|| AppError::NotConnected(id.to_string()))
+    }
+
+    /// Aborts the statement currently running on `id`'s exec connection, using
+    /// the shared pool to issue the cancel (the exec connection itself is busy
+    /// running it and can't service the request).
+    pub async fn cancel_exec(&self, id: &str) -> Result<()> {
+        let (pool, session_id) = {
+            let mut pools = self.pools.lock().await;
+            let conn = pools
+                .get_mut(id)
+                .ok_or_else(|| AppError::NotConnected(id.to_string()))?;
+            let Some(session_id) = conn.exec_session_id else {
+                return Err(if conn.pool.kind() == DbKind::Sqlite {
+                    AppError::Other("cancelamento não é suportado para SQLite".into())
+                } else {
+                    AppError::Other(
+                        "não foi possível identificar a sessão para cancelamento".into(),
+                    )
+                });
+            };
+            conn.cancelled = true;
+            (conn.pool.clone(), session_id)
+        };
+        pool.cancel_session(session_id).await
+    }
+
+    /// Clears the cancellation flag before a fresh execution starts, so a stray
+    /// cancel that raced a previous (already-finished) query doesn't misfire.
+    pub async fn clear_cancelled(&self, id: &str) {
+        if let Some(conn) = self.pools.lock().await.get_mut(id) {
+            conn.cancelled = false;
+        }
+    }
+
+    /// Reads and resets the cancellation flag; `true` means the in-flight
+    /// error was caused by a user-requested cancel, not a real connection loss.
+    pub async fn take_cancelled(&self, id: &str) -> bool {
+        match self.pools.lock().await.get_mut(id) {
+            Some(conn) => std::mem::take(&mut conn.cancelled),
+            None => false,
+        }
     }
 
     pub async fn disconnect(&self, id: &str) {

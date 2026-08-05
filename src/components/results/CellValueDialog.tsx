@@ -84,7 +84,7 @@ export function CellValueDialog({
     try {
       setText(JSON.stringify(JSON.parse(text), null, 2));
     } catch {
-      toast.error("JSON inválido");
+      toast.error("JSON inválido", { duration: Infinity });
     }
   }
 
@@ -93,7 +93,7 @@ export function CellValueDialog({
       try {
         onApply(JSON.stringify(JSON.parse(text))); // minify before applying
       } catch {
-        toast.error("JSON inválido");
+        toast.error("JSON inválido", { duration: Infinity });
         return;
       }
     } else {
@@ -107,7 +107,7 @@ export function CellValueDialog({
       await navigator.clipboard.writeText(text);
       toast.success("Copiado");
     } catch {
-      toast.error("Não foi possível copiar");
+      toast.error("Não foi possível copiar", { duration: Infinity });
     }
   }
 

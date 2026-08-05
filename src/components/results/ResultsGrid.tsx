@@ -33,7 +33,7 @@ async function copyText(text: string) {
     await navigator.clipboard.writeText(text);
     toast.success("Copiado");
   } catch {
-    toast.error("Não foi possível copiar");
+    toast.error("Não foi possível copiar", { duration: Infinity });
   }
 }
 
@@ -259,7 +259,10 @@ export function ResultsGrid({
       reset();
       onSaved?.();
     } catch (e) {
-      toast.error("Falha ao salvar alterações", { description: errMessage(e) });
+      toast.error("Falha ao salvar alterações", {
+        description: errMessage(e),
+        duration: Infinity,
+      });
     } finally {
       setSaving(false);
     }
