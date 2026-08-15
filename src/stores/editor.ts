@@ -65,8 +65,12 @@ interface EditorState {
   setActiveTab: (id: string) => void;
   setSql: (id: string, sql: string) => void;
   run: (id: string, sqlOverride?: string) => Promise<void>;
-  /** Runs each statement of the tab's SQL, in sequence, stopping at the first error. */
-  runAll: (id: string) => Promise<void>;
+  /**
+   * Runs each statement in sequence, stopping at the first error. Defaults to
+   * splitting the tab's full SQL; pass `statements` to run an explicit subset
+   * (e.g. a multi-statement editor selection) instead.
+   */
+  runAll: (id: string, statements?: string[]) => Promise<void>;
 }
 
 type PersistedTab = Pick<
@@ -196,14 +200,17 @@ export const useEditor = create<EditorState>()(
         }
       },
 
-      async runAll(id) {
+      async runAll(id, statements) {
         const tab = get().tabs.find((t) => t.id === id);
         if (!tab || tab.running) return;
-        const kind =
-          useConnections.getState().connections.find((c) => c.id === tab.connId)?.kind ??
-          "postgres";
-        const statements = splitStatements(tab.sql, kind);
-        if (!statements.length) return;
+        let texts = statements;
+        if (!texts) {
+          const kind =
+            useConnections.getState().connections.find((c) => c.id === tab.connId)?.kind ??
+            "postgres";
+          texts = splitStatements(tab.sql, kind).map((s) => s.text);
+        }
+        if (!texts.length) return;
 
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === id ? { ...t, running: true, error: null } : t)),
@@ -213,15 +220,15 @@ export const useEditor = create<EditorState>()(
         let lastResult: QueryResult | null = null;
         let failure: { index: number; message: string } | null = null;
 
-        for (let i = 0; i < statements.length; i++) {
-          const stmt = statements[i];
+        for (let i = 0; i < texts.length; i++) {
+          const stmt = texts[i];
           try {
-            const result = await api.runQuery(tab.connId, stmt.text);
+            const result = await api.runQuery(tab.connId, stmt);
             lastResult = result;
             newHistory.unshift({
               id: crypto.randomUUID(),
               connId: tab.connId,
-              sql: stmt.text,
+              sql: stmt,
               ok: true,
               elapsedMs: result.elapsedMs,
               rows: result.rows.length,
@@ -231,7 +238,7 @@ export const useEditor = create<EditorState>()(
             newHistory.unshift({
               id: crypto.randomUUID(),
               connId: tab.connId,
-              sql: stmt.text,
+              sql: stmt,
               ok: false,
               elapsedMs: 0,
               rows: 0,
@@ -243,7 +250,7 @@ export const useEditor = create<EditorState>()(
         }
 
         const error = failure
-          ? `statement ${failure.index + 1}/${statements.length} falhou: ${failure.message}`
+          ? `statement ${failure.index + 1}/${texts.length} falhou: ${failure.message}`
           : null;
 
         set((s) => ({

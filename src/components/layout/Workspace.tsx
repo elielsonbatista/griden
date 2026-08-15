@@ -307,7 +307,7 @@ function EditorPane({
           value={sql}
           onChange={(v) => setSql(tabId, v)}
           onRun={(stmt) => run(tabId, stmt)}
-          onRunAll={() => runAll(tabId)}
+          onRunAll={(stmts) => runAll(tabId, stmts)}
         />
       </div>
     </div>
@@ -494,6 +494,17 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
           </div>
         ) : hasGrid ? (
           <ResultsGrid
+            // Forces a full remount per result instead of an in-place DOM patch:
+            // the grid's sticky+backdrop-blur header combined with a large,
+            // varying column count (so the scroll container's content width
+            // swings widely between queries) can leave the WebView's compositor
+            // showing stale header/cell paint from the previous result even
+            // though React's own props/state are already correct — confirmed by
+            // comparing a plain (non-sticky) debug readout of `result.columns`
+            // against the actually-rendered header on the same query. A fresh
+            // key sidesteps that regardless of the exact underlying paint bug,
+            // and also resets any pending edit state between different results.
+            key={`${result!.columns.map((c) => c.name).join("|")}:${result!.rows.length}:${result!.elapsedMs}`}
             result={result!}
             editable={editable}
             onSaved={() => run(tabId)}
