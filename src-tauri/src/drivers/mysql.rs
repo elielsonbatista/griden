@@ -31,6 +31,18 @@ pub async fn connect(
     } else {
         MySqlSslMode::Disabled
     });
+    // Disables sqlx's client-side prepared-statement cache: a connection tunneled
+    // through a proxy/load balancer (e.g. an RDS proxy, ProxySQL, or an SSH
+    // tunnel terminating on a different backend) can route around it, so the
+    // client's cached statement id ends up referring to a different prepared
+    // statement server-side than the one it was cached for — surfacing as a
+    // query's result silently carrying column metadata from an unrelated,
+    // previously-run query on the same connection. sqlx's own docs recommend
+    // `capacity(0)` for exactly "databases or proxies that have issues with
+    // prepared statements". Each connection is otherwise reused for many
+    // distinct, user-edited ad hoc statements (not the same query repeatedly),
+    // so the cache buys little here relative to that risk.
+    opts = opts.statement_cache_capacity(0);
 
     // Probe: fails fast on "connection refused" (the pool would otherwise retry
     // until acquire_timeout). The timeout covers an unreachable host.
@@ -68,6 +80,7 @@ pub async fn execute(pool: &sqlx::MySqlPool, sql: &str) -> Result<QueryResult> {
     if rows.is_empty() {
         return Ok(QueryResult::empty(0, elapsed_ms));
     }
+    crate::drivers::assert_uniform_columns(&rows)?;
 
     let columns: Vec<ColumnInfo> = rows[0]
         .columns()
@@ -100,41 +113,61 @@ fn cell_to_json(row: &MySqlRow, idx: usize) -> Value {
     let unsigned = t.contains("UNSIGNED");
     match t.split_whitespace().next().unwrap_or("") {
         // TINYINT(1) arrives as "BOOLEAN" in sqlx, but it is an integer: shows 0/1.
+        //
+        // `try_get_unchecked` (not `try_get`) below: sqlx's `Type::compatible()` check
+        // is stricter than the wire format actually requires — e.g. it accepts `i32`
+        // only for columns it tags "INT"/"TINYINT", and rejects the identical raw byte
+        // layout when the same column is tagged "BOOLEAN" (TINYINT(1)) or "TIMESTAMP"
+        // (vs. "DATETIME"). `try_get` enforces that check and errors out even though
+        // the bytes decode fine; `try_get_unchecked` decodes the bytes directly.
         "BOOLEAN" | "BOOL" | "TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "INTEGER" => {
             if unsigned {
-                json_opt(row.try_get::<Option<u32>, _>(idx))
+                json_opt(row.try_get_unchecked::<Option<u32>, _>(idx), row, idx)
             } else {
-                json_opt(row.try_get::<Option<i32>, _>(idx))
+                json_opt(row.try_get_unchecked::<Option<i32>, _>(idx), row, idx)
             }
         }
         "BIGINT" => {
             if unsigned {
-                json_opt(row.try_get::<Option<u64>, _>(idx))
+                json_opt(row.try_get_unchecked::<Option<u64>, _>(idx), row, idx)
             } else {
-                json_opt(row.try_get::<Option<i64>, _>(idx))
+                json_opt(row.try_get_unchecked::<Option<i64>, _>(idx), row, idx)
             }
         }
-        "FLOAT" => json_opt(row.try_get::<Option<f32>, _>(idx)),
-        "DOUBLE" => json_opt(row.try_get::<Option<f64>, _>(idx)),
-        "DECIMAL" | "NEWDECIMAL" => {
-            json_string_opt(row.try_get::<Option<rust_decimal::Decimal>, _>(idx))
-        }
-        "DATE" => json_string_opt(row.try_get::<Option<chrono::NaiveDate>, _>(idx)),
-        "TIME" => json_string_opt(row.try_get::<Option<chrono::NaiveTime>, _>(idx)),
-        "DATETIME" | "TIMESTAMP" => {
-            json_string_opt(row.try_get::<Option<chrono::NaiveDateTime>, _>(idx))
-        }
+        "FLOAT" => json_opt(row.try_get_unchecked::<Option<f32>, _>(idx), row, idx),
+        "DOUBLE" => json_opt(row.try_get_unchecked::<Option<f64>, _>(idx), row, idx),
+        "DECIMAL" | "NEWDECIMAL" => json_string_opt(
+            row.try_get_unchecked::<Option<rust_decimal::Decimal>, _>(idx),
+            row,
+            idx,
+        ),
+        "DATE" => json_string_opt(
+            row.try_get_unchecked::<Option<chrono::NaiveDate>, _>(idx),
+            row,
+            idx,
+        ),
+        "TIME" => json_string_opt(
+            row.try_get_unchecked::<Option<chrono::NaiveTime>, _>(idx),
+            row,
+            idx,
+        ),
+        "DATETIME" | "TIMESTAMP" => json_string_opt(
+            row.try_get_unchecked::<Option<chrono::NaiveDateTime>, _>(idx),
+            row,
+            idx,
+        ),
         "JSON" => row
-            .try_get::<Option<Value>, _>(idx)
+            .try_get_unchecked::<Option<Value>, _>(idx)
             .unwrap_or(None)
             .unwrap_or(Value::Null),
         "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BINARY" | "VARBINARY" => {
-            match row.try_get::<Option<Vec<u8>>, _>(idx) {
+            match row.try_get_unchecked::<Option<Vec<u8>>, _>(idx) {
                 Ok(Some(bytes)) => Value::String(format!("0x{}", hex(&bytes))),
-                _ => Value::Null,
+                Ok(None) => Value::Null,
+                Err(e) => decode_fallback(row, idx, &e),
             }
         }
-        _ => json_string_opt(row.try_get::<Option<String>, _>(idx)),
+        _ => json_string_opt(row.try_get_unchecked::<Option<String>, _>(idx), row, idx),
     }
 }
 
@@ -142,16 +175,44 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-fn json_opt<T: Into<Value>>(v: std::result::Result<Option<T>, sqlx::Error>) -> Value {
-    match v {
-        Ok(Some(x)) => x.into(),
-        _ => Value::Null,
+/// A value is present but the typed decode above rejected it (e.g. a MySQL
+/// "zero date" `0000-00-00` that `chrono::NaiveDateTime` can't represent, or a
+/// type-mapping mismatch) — retry as a raw string rather than silently
+/// reporting it as NULL, which would be indistinguishable from a real NULL.
+fn decode_fallback(row: &MySqlRow, idx: usize, err: &sqlx::Error) -> Value {
+    match row.try_get_unchecked::<Option<String>, _>(idx) {
+        Ok(Some(s)) => Value::String(s),
+        Ok(None) => Value::Null,
+        Err(_) => {
+            eprintln!(
+                "griden: falha ao decodificar coluna '{}' (índice {idx}): {err}",
+                row.column(idx).name(),
+            );
+            Value::Null
+        }
     }
 }
 
-fn json_string_opt<T: ToString>(v: std::result::Result<Option<T>, sqlx::Error>) -> Value {
+fn json_opt<T: Into<Value>>(
+    v: std::result::Result<Option<T>, sqlx::Error>,
+    row: &MySqlRow,
+    idx: usize,
+) -> Value {
+    match v {
+        Ok(Some(x)) => x.into(),
+        Ok(None) => Value::Null,
+        Err(e) => decode_fallback(row, idx, &e),
+    }
+}
+
+fn json_string_opt<T: ToString>(
+    v: std::result::Result<Option<T>, sqlx::Error>,
+    row: &MySqlRow,
+    idx: usize,
+) -> Value {
     match v {
         Ok(Some(x)) => Value::String(x.to_string()),
-        _ => Value::Null,
+        Ok(None) => Value::Null,
+        Err(e) => decode_fallback(row, idx, &e),
     }
 }

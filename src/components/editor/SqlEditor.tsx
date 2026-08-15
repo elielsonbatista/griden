@@ -73,7 +73,13 @@ export const SqlEditor = forwardRef<
     const selection = view?.state.selection.main;
     const doc = valueRef.current;
     if (selection && !selection.empty) {
-      onRunRef.current(doc.slice(selection.from, selection.to));
+      const selectedText = doc.slice(selection.from, selection.to);
+      const selectedStatements = splitStatements(selectedText, kindRef.current);
+      if (selectedStatements.length > 1) {
+        onRunAllRef.current(selectedStatements.map((s) => s.text));
+      } else {
+        onRunRef.current(selectedText);
+      }
       return;
     }
     const statements = splitStatements(doc, kindRef.current);

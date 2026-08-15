@@ -10,10 +10,34 @@ pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
 
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::models::{ConnConfig, DbKind, QueryResult};
+use sqlx::{Column, Database, Row};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// Verifies every row shares the same column names as `rows[0]`. Guards against
+/// the DB's simple-query protocol silently concatenating rows from more than one
+/// result set into a single `Vec<Row>` (e.g. when an unsplit multi-statement
+/// string reaches `execute()`), which would otherwise let `columns` (derived
+/// from `rows[0]`) silently disagree with later rows' actual shape.
+pub(crate) fn assert_uniform_columns<R: Row>(rows: &[R]) -> Result<()>
+where
+    <R::Database as Database>::Column: Column,
+{
+    let first: Vec<&str> = rows[0].columns().iter().map(|c| c.name()).collect();
+    for (i, row) in rows.iter().enumerate().skip(1) {
+        let cols: Vec<&str> = row.columns().iter().map(|c| c.name()).collect();
+        if cols != first {
+            return Err(AppError::Database(format!(
+                "resultado inconsistente entre linhas (linha {i} tem colunas {cols:?}, esperado {first:?}) — \
+                 isso normalmente indica múltiplas instruções SQL executadas em uma única chamada; \
+                 separe os comandos com ';' e execute individualmente."
+            )));
+        }
+    }
+    Ok(())
+}
 
 /// Live pool/connection for an open connection.
 pub enum AnyPool {

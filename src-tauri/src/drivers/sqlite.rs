@@ -37,6 +37,7 @@ pub async fn execute(pool: &sqlx::SqlitePool, sql: &str) -> Result<QueryResult> 
     if rows.is_empty() {
         return Ok(QueryResult::empty(0, elapsed_ms));
     }
+    crate::drivers::assert_uniform_columns(&rows)?;
 
     let columns: Vec<ColumnInfo> = rows[0]
         .columns()
@@ -63,18 +64,28 @@ pub async fn execute(pool: &sqlx::SqlitePool, sql: &str) -> Result<QueryResult> 
 fn cell_to_json(row: &SqliteRow, idx: usize) -> Value {
     let t = row.column(idx).type_info().name().to_uppercase();
     match t.as_str() {
-        "INTEGER" | "BIGINT" | "INT" => json_opt(row.try_get::<Option<i64>, _>(idx)),
-        "REAL" | "FLOAT" | "DOUBLE" => json_opt(row.try_get::<Option<f64>, _>(idx)),
-        "BOOLEAN" => json_opt(row.try_get::<Option<bool>, _>(idx)),
+        // Unlike MySQL/Postgres (see mysql.rs), SQLite is dynamically typed per-value
+        // (column affinity, not a fixed wire type), so the regular `try_get`'s type
+        // check is doing real work here — it's what forces the catch-all arm below to
+        // fall through from String to i64 for a value actually stored as an integer.
+        // Bypassing it with `try_get_unchecked` stringifies such values instead.
+        "INTEGER" | "BIGINT" | "INT" => json_opt(row.try_get::<Option<i64>, _>(idx), row, idx),
+        "REAL" | "FLOAT" | "DOUBLE" => json_opt(row.try_get::<Option<f64>, _>(idx), row, idx),
+        "BOOLEAN" => json_opt(row.try_get::<Option<bool>, _>(idx), row, idx),
         "BLOB" => match row.try_get::<Option<Vec<u8>>, _>(idx) {
             Ok(Some(bytes)) => Value::String(format!("0x{}", hex(&bytes))),
-            _ => Value::Null,
+            Ok(None) => Value::Null,
+            Err(e) => decode_fallback(row, idx, &e),
         },
         // TEXT, NUMERIC, DATETIME, and unknowns: try string, then i64/f64.
         _ => match row.try_get::<Option<String>, _>(idx) {
             Ok(Some(s)) => Value::String(s),
             Ok(None) => Value::Null,
-            Err(_) => json_opt(row.try_get::<Option<i64>, _>(idx)),
+            Err(e) => match row.try_get::<Option<i64>, _>(idx) {
+                Ok(Some(v)) => v.into(),
+                Ok(None) => Value::Null,
+                Err(_) => decode_fallback(row, idx, &e),
+            },
         },
     }
 }
@@ -83,10 +94,32 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-fn json_opt<T: Into<Value>>(v: std::result::Result<Option<T>, sqlx::Error>) -> Value {
+/// A value is present but the typed decode above rejected it (e.g. a
+/// type-mapping mismatch) — retry as a raw string rather than silently
+/// reporting it as NULL, which would be indistinguishable from a real NULL.
+fn decode_fallback(row: &SqliteRow, idx: usize, err: &sqlx::Error) -> Value {
+    match row.try_get::<Option<String>, _>(idx) {
+        Ok(Some(s)) => Value::String(s),
+        Ok(None) => Value::Null,
+        Err(_) => {
+            eprintln!(
+                "griden: falha ao decodificar coluna '{}' (índice {idx}): {err}",
+                row.column(idx).name(),
+            );
+            Value::Null
+        }
+    }
+}
+
+fn json_opt<T: Into<Value>>(
+    v: std::result::Result<Option<T>, sqlx::Error>,
+    row: &SqliteRow,
+    idx: usize,
+) -> Value {
     match v {
         Ok(Some(x)) => x.into(),
-        _ => Value::Null,
+        Ok(None) => Value::Null,
+        Err(e) => decode_fallback(row, idx, &e),
     }
 }
 
@@ -169,6 +202,41 @@ mod tests {
         assert_eq!(fk.to_table, "authors");
         assert_eq!(fk.from_columns, vec!["author_id".to_string()]);
         assert_eq!(fk.to_columns, vec!["id".to_string()]);
+
+        pool.close().await;
+    }
+
+    /// A single `execute()` call given more than one `;`-separated statement
+    /// must never silently return a `QueryResult` whose `columns` (derived from
+    /// the first row) disagree with a later row's actual shape — either it
+    /// stays internally consistent, or it surfaces a clear error.
+    #[tokio::test]
+    async fn multi_statement_never_produces_mismatched_columns() {
+        let pool = AnyPool::connect(&sample_cfg(), None, 5).await.unwrap();
+
+        let res = pool
+            .execute("SELECT id, name FROM authors ORDER BY id; SELECT id FROM books ORDER BY id")
+            .await;
+
+        match res {
+            Ok(qr) => {
+                for row in &qr.rows {
+                    assert_eq!(
+                        row.len(),
+                        qr.columns.len(),
+                        "row width must match the reported column count"
+                    );
+                }
+            }
+            Err(e) => {
+                // Acceptable: rejecting a multi-statement string outright.
+                assert!(
+                    format!("{e}").contains("múltiplas instruções")
+                        || format!("{e}").to_lowercase().contains("error"),
+                    "unexpected error shape: {e}"
+                );
+            }
+        }
 
         pool.close().await;
     }
