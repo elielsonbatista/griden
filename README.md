@@ -1,6 +1,6 @@
 # Griden
 
-> A fast, modern database client — open-source, inspired by DBeaver, with a focus on UI/UX and performance.
+> A fast, modern database client: open-source, with a focus on UI/UX and performance.
 
 Griden is built with [Tauri](https://tauri.app) (native Rust backend) and
 [React](https://react.dev) + [Vite](https://vite.dev) + [Tailwind](https://tailwindcss.com) +
@@ -9,13 +9,13 @@ keeping credentials out of the webview.
 
 ## Features (in development)
 
-- 🔌 **Connections** — PostgreSQL, MySQL/MariaDB, SQLite, and MS SQL Server
-- 🌳 **Schema browser** — browse databases, schemas, tables, views, and columns
-- ⌨️ **SQL editor** — syntax highlighting and schema-aware autocomplete (CodeMirror 6)
-- 📊 **Results grid** — virtualized, ready for large datasets
-- ✏️ **Inline editing** — edit cells and generate transactional UPDATE/INSERT/DELETE
-- 🔗 **ER diagrams** — visualize relationships through foreign keys
-- 🔐 **SSH tunnel** — connect through a bastion/jump host (password or private-key auth)
+- **Connections**: PostgreSQL, MySQL/MariaDB, SQLite, and MS SQL Server
+- **Schema browser**: browse databases, schemas, tables, views, and columns
+- **SQL editor**: syntax highlighting and schema-aware autocomplete (CodeMirror 6)
+- **Results grid**: virtualized, ready for large datasets
+- **Inline editing**: edit cells and generate transactional UPDATE/INSERT/DELETE
+- **ER diagrams**: visualize relationships through foreign keys
+- **SSH tunnel**: connect through a bastion/jump host (password or private-key auth)
 
 ## Stack
 
