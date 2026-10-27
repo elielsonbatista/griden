@@ -1,14 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
+import App from "@/App";
 import { Toaster } from "@/components/ui/sonner";
-import "./index.css";
+import "@/index.css";
 
 document.documentElement.classList.add("dark");
 
-// Blocks the webview's native context menu (Inspect, Reload, etc.).
-// The app's own context menus (Radix) call preventDefault on their trigger and
-// open normally; copy/paste still work via keyboard shortcuts.
+// Hides the webview's native menu (Inspect, Reload). Radix menus still open
+// because they handle the event on their own trigger.
 window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

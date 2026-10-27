@@ -1,7 +1,7 @@
 [package]
 name = "griden"
 version = "0.1.0"
-description = "Griden — a fast, modern open-source database client"
+description = "Griden: a fast, modern open-source database client"
 authors = ["Griden contributors"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -56,7 +56,7 @@ tiberius = { version = "0.12", default-features = false, features = [
   "rust_decimal",
 ] }
 
-# SSH tunneling (cliente SSH puro em Rust, sem deps de sistema)
+# SSH tunneling (pure Rust SSH client, no system dependencies)
 russh = "0.61"
 tauri-plugin-dialog = "2.7.1"
 

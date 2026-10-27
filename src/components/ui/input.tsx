@@ -8,7 +8,7 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
       type={type}
       data-slot="input"
       // WKWebView (macOS/iOS) auto-capitalizes the first letter of plain text
-      // inputs by default — wrong for hostnames, usernames, DB names, etc.
+      // inputs by default, wrong for hostnames, usernames, DB names, etc.
       autoCapitalize="off"
       autoCorrect="off"
       spellCheck={false}

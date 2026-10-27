@@ -1,9 +1,5 @@
-//! SSH tunnel for database connections (local port-forwarding).
-//!
-//! Establishes an SSH session, opens a listener on `127.0.0.1:<ephemeral port>`
-//! and, for each incoming connection, opens a `direct-tcpip` channel to the
-//! database host/port, copying bytes in both directions. The database driver
-//! connects to the local listener without knowing about the tunnel.
+//! Local port-forwarding: drivers connect to `127.0.0.1:<ephemeral>` and never
+//! know about the tunnel.
 
 use crate::error::{AppError, Result};
 use russh::client;
@@ -11,7 +7,6 @@ use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-/// SSH authentication method.
 pub enum SshAuth {
     Password(String),
     Key {
@@ -20,7 +15,6 @@ pub enum SshAuth {
     },
 }
 
-/// Resolved parameters for opening the tunnel (secrets already retrieved from the keychain).
 pub struct SshParams {
     pub host: String,
     pub port: u16,
@@ -28,8 +22,7 @@ pub struct SshParams {
     pub auth: SshAuth,
 }
 
-/// SSH client handler. Accepts the server key (MVP — no known_hosts
-/// verification; a future improvement could validate the fingerprint).
+/// Accepts any server key: there is no known_hosts verification yet.
 struct Client;
 
 impl client::Handler for Client {
@@ -43,7 +36,7 @@ impl client::Handler for Client {
     }
 }
 
-/// An active tunnel. When dropped, it shuts down the forwarding loop and the SSH session.
+/// Dropping it stops the forwarding loop and the SSH session.
 pub struct SshTunnel {
     local_port: u16,
     task: tokio::task::JoinHandle<()>,
@@ -61,10 +54,8 @@ impl Drop for SshTunnel {
     }
 }
 
-/// Opens the tunnel to `target_host:target_port` through the SSH server.
 pub async fn open(p: &SshParams, target_host: &str, target_port: u16) -> Result<SshTunnel> {
     let config = Arc::new(client::Config::default());
-    // Timeout so we don't hang when the SSH server is unreachable.
     let connect = client::connect(config, (p.host.as_str(), p.port), Client);
     let mut session = match tokio::time::timeout(std::time::Duration::from_secs(10), connect).await
     {
@@ -109,8 +100,7 @@ pub async fn open(p: &SshParams, target_host: &str, target_port: u16) -> Result<
                 Ok(s) => s,
                 Err(_) => break,
             };
-            // Turn off Nagle's algorithm: small queries/responses shouldn't
-            // wait (~40ms delay), reducing per-round-trip latency.
+            // Nagle adds ~40 ms to small query/response round-trips.
             let _ = socket.set_nodelay(true);
             let session = session.clone();
             let host = target_host.clone();

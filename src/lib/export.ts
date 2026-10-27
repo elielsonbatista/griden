@@ -1,7 +1,6 @@
 import type { QueryResult, Cell } from "@/types";
 import { formatCell } from "@/lib/format";
 
-/** Escapes a value for delimited formats (CSV). */
 function escapeDelimited(value: Cell): string {
   const s = formatCell(value);
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -15,7 +14,7 @@ export function toCsv(result: QueryResult): string {
 }
 
 export function toTsv(result: QueryResult): string {
-  // Tabs/line breaks become spaces — a simple format for pasting into spreadsheets.
+  // TSV has no quoting, so tabs and line breaks would split cells when pasted into a spreadsheet.
   const clean = (v: Cell) => formatCell(v).replace(/[\t\n\r]+/g, " ");
   const header = result.columns.map((c) => c.name).join("\t");
   const lines = result.rows.map((row) => row.map(clean).join("\t"));
@@ -23,7 +22,6 @@ export function toTsv(result: QueryResult): string {
 }
 
 export function toJson(result: QueryResult): string {
-  // Each row becomes an object; JSON/JSONB values stay nested.
   const rows = result.rows.map((row) => {
     const obj: Record<string, Cell> = {};
     result.columns.forEach((c, i) => {
@@ -41,3 +39,14 @@ export function toMarkdown(result: QueryResult): string {
   const lines = result.rows.map((row) => `| ${row.map(cell).join(" | ")} |`);
   return [header, sep, ...lines].join("\n");
 }
+
+export const EXPORT_FORMATS: {
+  label: string;
+  ext: string;
+  build: (r: QueryResult) => string;
+}[] = [
+  { label: "CSV", ext: "csv", build: toCsv },
+  { label: "JSON", ext: "json", build: toJson },
+  { label: "TSV", ext: "tsv", build: toTsv },
+  { label: "Markdown", ext: "md", build: toMarkdown },
+];

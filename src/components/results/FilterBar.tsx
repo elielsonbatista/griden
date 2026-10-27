@@ -36,7 +36,7 @@ export function FilterBar({
   onApply: () => void;
   onToggleSql: () => void;
 }) {
-  // Clears the selected column if it no longer exists (table switch).
+  // A column can disappear when the result changes; a stale pick would build an invalid WHERE.
   useEffect(() => {
     setRows((rs) =>
       rs.some((r) => r.column && !columns.includes(r.column))

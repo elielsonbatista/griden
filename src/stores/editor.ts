@@ -10,7 +10,8 @@ import type { FilterCondition } from "@/lib/query";
 let idSeq = 1;
 let queryTitleSeq = 1;
 
-/** Context that makes the grid editable (tab opened from a table). */
+const HISTORY_LIMIT = 200;
+
 export interface EditableSource {
   schema: string;
   table: string;
@@ -27,11 +28,9 @@ export interface QueryTab {
   error: string | null;
   running: boolean;
   editable?: EditableSource;
-  /** FKs of the source table (to navigate to referenced records). */
   foreignKeys?: ForeignKey[];
-  /** Set when the tab was opened from a table/view (data view). */
+  /** Present when the tab is a table data view rather than a SQL editor. */
   source?: { schema: string; table: string };
-  /** Filters pre-applied on open (e.g. foreign key navigation). */
   initialFilters?: FilterCondition[];
 }
 
@@ -61,14 +60,12 @@ interface EditorState {
     initialFilters?: FilterCondition[],
   ) => string;
   closeTab: (id: string) => void;
-  /** Reorders: moves the `draggedId` tab to the position of `targetId`. */
   moveTab: (draggedId: string, targetId: string) => void;
   setActiveTab: (id: string) => void;
   setSql: (id: string, sql: string) => void;
   run: (id: string, sqlOverride?: string) => Promise<void>;
-  /** Runs each statement of the tab's SQL, in sequence, stopping at the first error. */
+  /** Stops at the first failing statement. */
   runAll: (id: string) => Promise<void>;
-  /** Requests cancellation of the query currently running for this tab's connection. */
   cancel: (id: string) => Promise<void>;
 }
 
@@ -84,6 +81,18 @@ type PersistedTab = Pick<
   | "source"
   | "initialFilters"
 >;
+
+function historyEntry(connId: string, sql: string, result: QueryResult | null): HistoryEntry {
+  return {
+    id: crypto.randomUUID(),
+    connId,
+    sql,
+    ok: result !== null,
+    elapsedMs: result?.elapsedMs ?? 0,
+    rows: result?.rows.length ?? 0,
+    at: Date.now(),
+  };
+}
 
 interface PersistedEditorState {
   activeTabId: string | null;
@@ -166,35 +175,13 @@ export const useEditor = create<EditorState>()(
           const result = await api.runQuery(tab.connId, sql);
           set((s) => ({
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, result, running: false } : t)),
-            history: [
-              {
-                id: crypto.randomUUID(),
-                connId: tab.connId,
-                sql,
-                ok: true,
-                elapsedMs: result.elapsedMs,
-                rows: result.rows.length,
-                at: Date.now(),
-              },
-              ...s.history,
-            ].slice(0, 200),
+            history: [historyEntry(tab.connId, sql, result), ...s.history].slice(0, HISTORY_LIMIT),
           }));
         } catch (e) {
           const error = errMessage(e);
           set((s) => ({
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, error, running: false } : t)),
-            history: [
-              {
-                id: crypto.randomUUID(),
-                connId: tab.connId,
-                sql,
-                ok: false,
-                elapsedMs: 0,
-                rows: 0,
-                at: Date.now(),
-              },
-              ...s.history,
-            ].slice(0, 200),
+            history: [historyEntry(tab.connId, sql, null), ...s.history].slice(0, HISTORY_LIMIT),
           }));
         }
       },
@@ -221,25 +208,9 @@ export const useEditor = create<EditorState>()(
           try {
             const result = await api.runQuery(tab.connId, stmt.text);
             lastResult = result;
-            newHistory.unshift({
-              id: crypto.randomUUID(),
-              connId: tab.connId,
-              sql: stmt.text,
-              ok: true,
-              elapsedMs: result.elapsedMs,
-              rows: result.rows.length,
-              at: Date.now(),
-            });
+            newHistory.unshift(historyEntry(tab.connId, stmt.text, result));
           } catch (e) {
-            newHistory.unshift({
-              id: crypto.randomUUID(),
-              connId: tab.connId,
-              sql: stmt.text,
-              ok: false,
-              elapsedMs: 0,
-              rows: 0,
-              at: Date.now(),
-            });
+            newHistory.unshift(historyEntry(tab.connId, stmt.text, null));
             failure = { index: i, message: errMessage(e) };
             break;
           }
@@ -253,16 +224,15 @@ export const useEditor = create<EditorState>()(
           tabs: s.tabs.map((t) =>
             t.id === id ? { ...t, result: error ? null : lastResult, error, running: false } : t,
           ),
-          history: [...newHistory, ...s.history].slice(0, 200),
+          history: [...newHistory, ...s.history].slice(0, HISTORY_LIMIT),
         }));
       },
 
       async cancel(id) {
         const tab = get().tabs.find((t) => t.id === id);
         if (!tab || !tab.running) return;
-        // The actual cancellation result (or success) surfaces through the
-        // in-flight run()/runAll() call on its own; this only reports when
-        // the cancel request itself couldn't be issued (e.g. no session id).
+        // The outcome surfaces through the in-flight run()/runAll(); this only
+        // reports a cancel that could not be issued at all.
         try {
           await api.cancelQuery(tab.connId);
         } catch (e) {

@@ -1,6 +1,3 @@
-//! Tauri commands exposed to the frontend. These are thin wrappers over the
-//! `ConnectionManager` and the driver layer.
-
 use crate::connection::ConnectionManager;
 use crate::drivers::AnyPool;
 use crate::edits;
@@ -42,8 +39,6 @@ where
     }
 }
 
-/// Like `with_reconnect`, but over the single-connection pool dedicated to
-/// execution (`run_query`/`apply_edits`) — see [`ConnectionManager::get_exec_pool`].
 async fn with_reconnect_exec<T, F, Fut>(mgr: &ConnectionManager, id: &str, op: F) -> Result<T>
 where
     F: Fn(Arc<AnyPool>) -> Fut,
@@ -124,9 +119,6 @@ pub async fn run_query(
     .await
 }
 
-/// Aborts the statement currently running via `run_query`/`apply_edits` on
-/// this connection's exec pool. Not supported for SQLite (no separate session
-/// to cancel from); returns an error in that case.
 #[tauri::command]
 pub async fn cancel_query(mgr: State<'_, ConnectionManager>, id: String) -> Result<()> {
     mgr.cancel_exec(&id).await
@@ -194,9 +186,7 @@ pub async fn get_foreign_keys(
     .await
 }
 
-/// Opens a native "save as" dialog and writes the content (CSV, JSON, etc.). The
-/// file filter is derived from the extension of `default_name`. Returns `false`
-/// if the user cancels. Downloading via <a> does not work in the webview.
+/// Returns `false` if the user cancels. Downloading through `<a>` does not work in the webview.
 #[tauri::command]
 pub async fn save_file(app: AppHandle, default_name: String, content: String) -> Result<bool> {
     let ext = std::path::Path::new(&default_name)

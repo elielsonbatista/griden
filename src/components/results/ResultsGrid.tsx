@@ -1,8 +1,18 @@
 import { forwardRef, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { Cell, ForeignKey, QueryResult, RowEdit } from "@/types";
+import type { Cell, ForeignKey, QueryResult } from "@/types";
 import { cn } from "@/lib/utils";
 import { formatCell } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
+import {
+  buildRowEdits,
+  cellEditFromText,
+  cellEditToNull,
+  pendingChangeCount,
+  withCellEdit,
+  type EditMap,
+} from "@/lib/edits";
+import { relatedTarget, type RelatedTarget } from "@/lib/query";
 import { api, errMessage } from "@/lib/ipc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,15 +38,6 @@ import {
 } from "lucide-react";
 import { CellValueDialog } from "@/components/results/CellValueDialog";
 
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("Copiado");
-  } catch {
-    toast.error("Não foi possível copiar", { duration: Infinity });
-  }
-}
-
 const ROW_HEIGHT = 28;
 const COL_WIDTH = 200;
 const NUM_COL = 56;
@@ -48,13 +49,6 @@ export interface EditableContext {
   pkColumns: string[];
 }
 
-export interface RelatedTarget {
-  schema: string;
-  table: string;
-  conditions: { col: string; value: Cell }[];
-}
-
-type EditMap = Map<number, Map<string, Cell>>;
 type EditingCell = { kind: "row" | "insert"; index: number; col: string } | null;
 
 export function ResultsGrid({
@@ -76,11 +70,10 @@ export function ResultsGrid({
   const [inserts, setInserts] = useState<Record<string, Cell>[]>([]);
   const [editing, setEditing] = useState<EditingCell>(null);
   const [saving, setSaving] = useState(false);
-  // Cell under the cursor on right click (a single context menu for the whole grid).
+  // One context menu serves the whole grid, so it needs to know which cell was hit.
   const [menuTarget, setMenuTarget] = useState<{ rowIdx: number; col: string } | null>(
     null,
   );
-  // Cell shown in the value dialog (for long values / JSON).
   const [valueDialog, setValueDialog] = useState<{ rowIdx: number; col: string } | null>(
     null,
   );
@@ -95,7 +88,6 @@ export function ResultsGrid({
   const canEdit = !!editable;
   const totalWidth = result.columns.length * COL_WIDTH + NUM_COL;
 
-  // Column -> FK that contains it (first match). Enables navigating to the reference.
   const fkByColumn = useMemo(() => {
     const m = new Map<string, ForeignKey>();
     for (const fk of foreignKeys ?? []) {
@@ -105,11 +97,7 @@ export function ResultsGrid({
   }, [foreignKeys]);
 
   function openFk(fk: ForeignKey, rowIdx: number) {
-    const conditions = fk.toColumns.map((toCol, i) => ({
-      col: toCol,
-      value: cellValue(rowIdx, fk.fromColumns[i]),
-    }));
-    onOpenRelated?.({ schema: fk.toSchema, table: fk.toTable, conditions });
+    onOpenRelated?.(relatedTarget(fk, (col) => cellValue(rowIdx, col)));
   }
 
   const virtualizer = useVirtualizer({
@@ -119,10 +107,11 @@ export function ResultsGrid({
     overscan: 12,
   });
 
-  const dirtyCount =
-    [...edits.entries()].filter(([r]) => !deleted.has(r) && edits.get(r)!.size > 0).length +
-    deleted.size +
-    inserts.length;
+  const dirtyCount = pendingChangeCount(edits, deleted, inserts);
+
+  function originalValue(rowIdx: number, col: string): Cell {
+    return result.rows[rowIdx][colIndex.get(col)!];
+  }
 
   function reset() {
     setEdits(new Map());
@@ -135,25 +124,7 @@ export function ResultsGrid({
     if (!editing) return;
     const { kind, index, col } = editing;
     if (kind === "row") {
-      const original = result.rows[index][colIndex.get(col)!];
-      setEdits((prev) => {
-        const m = new Map(prev);
-        const row = new Map(m.get(index) ?? []);
-        // No change if the text matches the representation of the original value
-        // (covers NULL -> "", JSON -> object, numbers, etc.). Also reverts an edit.
-        if (value === formatCell(original)) {
-          row.delete(col);
-        } else {
-          const next: Cell =
-            typeof original === "number" && value.trim() !== "" && !isNaN(Number(value))
-              ? Number(value)
-              : value;
-          row.set(col, next);
-        }
-        if (row.size === 0) m.delete(index);
-        else m.set(index, row);
-        return m;
-      });
+      setCellValue(index, col, value);
     } else {
       setInserts((prev) => {
         const arr = prev.map((r) => ({ ...r }));
@@ -167,33 +138,17 @@ export function ResultsGrid({
   function cellValue(rowIdx: number, col: string): Cell {
     const e = edits.get(rowIdx);
     if (e && e.has(col)) return e.get(col)!;
-    return result.rows[rowIdx][colIndex.get(col)!];
+    return originalValue(rowIdx, col);
   }
 
   function setCellNull(rowIdx: number, col: string) {
-    const original = result.rows[rowIdx][colIndex.get(col)!];
-    setEdits((prev) => {
-      const m = new Map(prev);
-      const row = new Map(m.get(rowIdx) ?? []);
-      if (original === null) row.delete(col);
-      else row.set(col, null);
-      m.set(rowIdx, row);
-      return m;
-    });
+    const next = cellEditToNull(originalValue(rowIdx, col));
+    setEdits((prev) => withCellEdit(prev, rowIdx, col, next));
   }
 
-  /** Applies a value (string) as a pending edit — without running a query. */
-  function setCellValue(rowIdx: number, col: string, value: string) {
-    const original = result.rows[rowIdx][colIndex.get(col)!];
-    setEdits((prev) => {
-      const m = new Map(prev);
-      const row = new Map(m.get(rowIdx) ?? []);
-      if (value === formatCell(original)) row.delete(col);
-      else row.set(col, value);
-      if (row.size === 0) m.delete(rowIdx);
-      else m.set(rowIdx, row);
-      return m;
-    });
+  function setCellValue(rowIdx: number, col: string, text: string) {
+    const next = cellEditFromText(text, originalValue(rowIdx, col));
+    setEdits((prev) => withCellEdit(prev, rowIdx, col, next));
   }
 
   function toggleDelete(rowIdx: number) {
@@ -210,7 +165,6 @@ export function ResultsGrid({
     );
   }
 
-  // Identifies the cell under the cursor (via data-attributes) before the menu opens.
   function onCellContextMenu(e: React.MouseEvent) {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
     if (el?.dataset.row != null && el.dataset.col != null) {
@@ -222,34 +176,7 @@ export function ResultsGrid({
 
   async function save() {
     if (!editable) return;
-    const { schema, table, pkColumns } = editable;
-    const pkOf = (rowIdx: number): Record<string, Cell> => {
-      const pk: Record<string, Cell> = {};
-      for (const c of pkColumns) pk[c] = result.rows[rowIdx][colIndex.get(c)!];
-      return pk;
-    };
-
-    const batch: RowEdit[] = [];
-    for (const [rowIdx, cols] of edits) {
-      if (deleted.has(rowIdx) || cols.size === 0) continue;
-      batch.push({
-        op: "update",
-        schema,
-        table,
-        pk: pkOf(rowIdx),
-        values: Object.fromEntries(cols),
-      });
-    }
-    for (const rowIdx of deleted) {
-      batch.push({ op: "delete", schema, table, pk: pkOf(rowIdx), values: {} });
-    }
-    for (const ins of inserts) {
-      const values = Object.fromEntries(
-        Object.entries(ins).filter(([, v]) => v !== "" && v !== null),
-      );
-      if (Object.keys(values).length > 0)
-        batch.push({ op: "insert", schema, table, pk: {}, values });
-    }
+    const batch = buildRowEdits({ result, ...editable, edits, deleted, inserts });
     if (batch.length === 0) return;
 
     setSaving(true);
@@ -305,7 +232,6 @@ export function ResultsGrid({
 
       <div ref={parentRef} className="flex-1 overflow-auto text-sm">
         <div style={{ width: totalWidth, position: "relative" }}>
-          {/* Header */}
           <div className="sticky top-0 z-10 flex border-b bg-muted/60 backdrop-blur">
             <Cellbox width={NUM_COL} className="justify-center text-muted-foreground/60">
               #
@@ -323,7 +249,6 @@ export function ResultsGrid({
             ))}
           </div>
 
-          {/* Existing rows (virtualized) */}
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((v) => {
               const rowIdx = v.index;
@@ -350,13 +275,7 @@ export function ResultsGrid({
                       <button
                         title={isDeleted ? "Desfazer exclusão" : "Excluir linha"}
                         className="opacity-0 group-hover/r:opacity-100"
-                        onClick={() =>
-                          setDeleted((p) => {
-                            const n = new Set(p);
-                            n.has(rowIdx) ? n.delete(rowIdx) : n.add(rowIdx);
-                            return n;
-                          })
-                        }
+                        onClick={() => toggleDelete(rowIdx)}
                       >
                         {isDeleted ? (
                           <Undo2 className="h-3.5 w-3.5" />
@@ -395,7 +314,6 @@ export function ResultsGrid({
             })}
           </div>
 
-          {/* Inserted rows */}
           {inserts.map((row, i) => (
             <div
               key={`ins-${i}`}
@@ -532,7 +450,6 @@ interface DataCellProps {
   onStartEdit?: () => void;
   onCommit?: (v: string) => void;
   onCancel?: () => void;
-  /** If set, the cell is an FK and shows a button to open the reference. */
   onOpenFk?: () => void;
 }
 

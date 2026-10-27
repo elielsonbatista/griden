@@ -1,31 +1,27 @@
-import type { Cell, DbKind } from "@/types";
+import type { Cell, DbKind, ForeignKey } from "@/types";
 
-/** Escapes an identifier (table/column) according to the dialect. */
 export function quoteIdent(kind: DbKind, ident: string): string {
   switch (kind) {
     case "mysql":
       return "`" + ident.replace(/`/g, "``") + "`";
     case "mssql":
       return "[" + ident.replace(/]/g, "]]") + "]";
-    default: // postgres, sqlite
+    default:
       return '"' + ident.replace(/"/g, '""') + '"';
   }
 }
 
-/** Qualified name (schema.table), except sqlite which doesn't use a schema. */
 export function qualifiedName(kind: DbKind, schema: string, table: string): string {
   if (kind === "sqlite") return quoteIdent(kind, table);
   return `${quoteIdent(kind, schema)}.${quoteIdent(kind, table)}`;
 }
 
-/** Default SELECT when opening a table, with a per-dialect limit. */
 export function defaultSelect(kind: DbKind, schema: string, table: string): string {
   const t = qualifiedName(kind, schema, table);
   if (kind === "mssql") return `SELECT TOP 100 * FROM ${t}`;
   return `SELECT * FROM ${t} LIMIT 100`;
 }
 
-/** Renders a value as a SQL literal, escaped according to the dialect. */
 export function sqlLiteral(kind: DbKind, value: Cell): string {
   if (value === null) return "NULL";
   if (typeof value === "boolean") {
@@ -36,8 +32,6 @@ export function sqlLiteral(kind: DbKind, value: Cell): string {
   const s = typeof value === "object" ? JSON.stringify(value) : String(value);
   return `'${s.replace(/'/g, "''")}'`;
 }
-
-// ----- Data view filters -----
 
 export type FilterOp =
   | "="
@@ -72,7 +66,7 @@ export interface FilterCondition {
   value: string;
 }
 
-/** Builds `SELECT * FROM table [WHERE ...] LIMIT 100` from the filters. */
+/** Conditions without a column, or without a required value, are ignored. */
 export function buildTableQuery(
   kind: DbKind,
   schema: string,
@@ -98,4 +92,21 @@ export function buildTableQuery(
   const where = parts.length ? ` WHERE ${parts.join(" AND ")}` : "";
   if (kind === "mssql") return `SELECT TOP 100 * FROM ${t}${where}`;
   return `SELECT * FROM ${t}${where} LIMIT 100`;
+}
+
+export interface RelatedTarget {
+  schema: string;
+  table: string;
+  filters: FilterCondition[];
+}
+
+/** Filters that open the row referenced by `fk`, read from the referencing row. */
+export function relatedTarget(fk: ForeignKey, valueOf: (column: string) => Cell): RelatedTarget {
+  const filters = fk.toColumns.map((toCol, i): FilterCondition => {
+    const value = valueOf(fk.fromColumns[i]);
+    return value === null
+      ? { column: toCol, op: "isnull", value: "" }
+      : { column: toCol, op: "=", value: String(value) };
+  });
+  return { schema: fk.toSchema, table: fk.toTable, filters };
 }

@@ -1,6 +1,3 @@
-//! Connection management: persisting configs (JSON), secrets in the OS
-//! keychain, an optional SSH tunnel, and a registry of live connections.
-
 use crate::drivers::AnyPool;
 use crate::error::{AppError, Result};
 use crate::models::{ConnConfig, ConnInput, DbKind, SshAuthKind};
@@ -12,36 +9,24 @@ use tokio::sync::Mutex;
 
 const KEYRING_SERVICE: &str = "dev.griden.app";
 
-/// A live connection: the driver pool and, if any, the SSH tunnel backing it.
-/// The tunnel is torn down when the connection is removed (Drop).
 struct LiveConnection {
     pool: Arc<AnyPool>,
-    /// Single-connection pool dedicated to query execution (run/apply_edits).
-    /// Ensures statements run in sequence (e.g. Run all, or two separate
-    /// executions in the same tab) share the same database session —
-    /// required for temporary tables, session variables, etc., which are
-    /// scoped to the physical connection and would be lost if a random one
-    /// from the pool were picked.
+    /// Single connection so consecutive executions share one session (temp
+    /// tables, session variables). A pooled pick could land on another session.
     exec_pool: Arc<AnyPool>,
-    /// Identifies the exec pool's physical session, so `cancel_exec` can abort
-    /// its current statement from the (separate) shared pool. `None` when the
-    /// backend has no such concept (sqlite) or the lookup failed.
     exec_session_id: Option<i64>,
-    /// Set by `cancel_exec` and consumed by `with_reconnect_exec`: distinguishes
-    /// a user-requested cancellation from a genuine dropped connection, so a
-    /// cancelled query isn't silently retried.
+    /// Tells a user cancel apart from a real dropped connection, so a cancelled
+    /// query is never retried by `with_reconnect_exec`.
     cancelled: bool,
     _tunnel: Option<SshTunnel>,
 }
 
-/// State managed by Tauri.
 pub struct ConnectionManager {
     config_path: PathBuf,
     pools: Mutex<HashMap<String, LiveConnection>>,
 }
 
 impl ConnectionManager {
-    /// Creates the manager pointing at `<config_dir>/connections.json`.
     pub fn new(config_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&config_dir)?;
         Ok(Self {
@@ -49,8 +34,6 @@ impl ConnectionManager {
             pools: Mutex::new(HashMap::new()),
         })
     }
-
-    // ---- Config persistence ----
 
     pub fn list_configs(&self) -> Result<Vec<ConnConfig>> {
         if !self.config_path.exists() {
@@ -76,8 +59,6 @@ impl ConnectionManager {
             .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))
     }
 
-    /// Creates or updates a connection. Passwords (database and SSH) go to the
-    /// keychain and are never written to the config file.
     pub fn save_config(&self, input: ConnInput) -> Result<ConnConfig> {
         let mut configs = self.list_configs()?;
         let id = input
@@ -125,11 +106,6 @@ impl ConnectionManager {
         Ok(())
     }
 
-    // ---- Live connections ----
-
-    /// Opens (or reopens) the connection: a shared pool (introspection) and a
-    /// single-connection pool dedicated to query execution, both over the
-    /// same SSH tunnel when present.
     pub async fn connect(&self, id: &str) -> Result<()> {
         let config = self.get_config(id)?;
         let db_password = get_secret(id)?;
@@ -193,9 +169,7 @@ impl ConnectionManager {
             .ok_or_else(|| AppError::NotConnected(id.to_string()))
     }
 
-    /// Aborts the statement currently running on `id`'s exec connection, using
-    /// the shared pool to issue the cancel (the exec connection itself is busy
-    /// running it and can't service the request).
+    /// Issued through the shared pool because the exec connection is busy running the statement.
     pub async fn cancel_exec(&self, id: &str) -> Result<()> {
         let (pool, session_id) = {
             let mut pools = self.pools.lock().await;
@@ -217,16 +191,13 @@ impl ConnectionManager {
         pool.cancel_session(session_id).await
     }
 
-    /// Clears the cancellation flag before a fresh execution starts, so a stray
-    /// cancel that raced a previous (already-finished) query doesn't misfire.
+    /// A cancel that raced an already-finished query must not hit the next one.
     pub async fn clear_cancelled(&self, id: &str) {
         if let Some(conn) = self.pools.lock().await.get_mut(id) {
             conn.cancelled = false;
         }
     }
 
-    /// Reads and resets the cancellation flag; `true` means the in-flight
-    /// error was caused by a user-requested cancel, not a real connection loss.
     pub async fn take_cancelled(&self, id: &str) -> bool {
         match self.pools.lock().await.get_mut(id) {
             Some(conn) => std::mem::take(&mut conn.cancelled),
@@ -238,7 +209,6 @@ impl ConnectionManager {
         if let Some(conn) = self.pools.lock().await.remove(id) {
             conn.pool.close().await;
             conn.exec_pool.close().await;
-            // _tunnel is torn down on Drop when it goes out of scope.
         }
     }
 
@@ -246,7 +216,6 @@ impl ConnectionManager {
         self.pools.lock().await.contains_key(id)
     }
 
-    /// Tests a config without persisting it: connects, pings, and closes.
     pub async fn test(&self, input: &ConnInput) -> Result<()> {
         let id = input.id.clone().unwrap_or_default();
         let config = config_from_input(&id, input);
@@ -268,7 +237,6 @@ impl ConnectionManager {
     }
 }
 
-/// Builds the persistable `ConnConfig` from the input (without secrets).
 fn config_from_input(id: &str, input: &ConnInput) -> ConnConfig {
     ConnConfig {
         id: id.to_string(),
@@ -288,8 +256,6 @@ fn config_from_input(id: &str, input: &ConnInput) -> ConnConfig {
     }
 }
 
-/// Opens the (shared) pool, setting up an SSH tunnel first when enabled
-/// (except sqlite). Used only by `test()`, which needs no dedicated pool.
 async fn open_pool(
     config: &ConnConfig,
     db_password: Option<&str>,
@@ -302,8 +268,6 @@ async fn open_pool(
     Ok((Arc::new(pool), tunnel))
 }
 
-/// Resolves the connection target, opening an SSH tunnel when enabled (except
-/// sqlite) and repointing the config at the tunnel's local listener.
 async fn resolve_target(
     config: &ConnConfig,
     ssh_password: Option<String>,
@@ -373,8 +337,6 @@ fn default_port(kind: DbKind) -> u16 {
     }
 }
 
-// ---- Keychain (secrets) ----
-
 fn ssh_pw_account(id: &str) -> String {
     format!("{id}#ssh-password")
 }
@@ -383,7 +345,7 @@ fn ssh_pass_account(id: &str) -> String {
     format!("{id}#ssh-passphrase")
 }
 
-/// Uses the provided value (if non-empty) or looks it up in the keychain by the account derived from the id.
+/// An empty provided value means "unchanged", so fall back to the stored secret.
 fn resolve_secret(
     provided: &Option<String>,
     id: Option<&str>,

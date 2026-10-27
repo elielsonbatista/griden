@@ -1,5 +1,3 @@
-//! MySQL/MariaDB driver via sqlx.
-
 use crate::error::{AppError, Result};
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
 use serde_json::Value;
@@ -24,16 +22,14 @@ pub async fn connect(
     if let Some(pw) = password {
         opts = opts.password(pw);
     }
-    // SSL unchecked => actually disables TLS (avoids HandshakeFailure over
-    // plaintext, e.g. via an SSH tunnel). SSL checked => requires TLS.
+    // Disable, not Prefer: plaintext servers behind an SSH tunnel fail the TLS handshake.
     opts = opts.ssl_mode(if cfg.ssl {
         MySqlSslMode::Required
     } else {
         MySqlSslMode::Disabled
     });
 
-    // Probe: fails fast on "connection refused" (the pool would otherwise retry
-    // until acquire_timeout). The timeout covers an unreachable host.
+    // A single probe fails fast; the pool would retry until acquire_timeout.
     let probe = sqlx::MySqlConnection::connect_with(&opts);
     match tokio::time::timeout(Duration::from_secs(10), probe).await {
         Ok(Ok(conn)) => {
@@ -50,8 +46,8 @@ pub async fn connect(
     let pool = MySqlPoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
-        // Avoids a validation round-trip on every query (costly over an SSH tunnel).
-        // Recycles connections to reduce stale ones; an automatic retry covers the rest.
+        // Skips a round-trip per query (costly over SSH); recycling plus the retry
+        // in `AnyPool::execute` covers stale connections.
         .test_before_acquire(false)
         .max_lifetime(Duration::from_secs(1800))
         .idle_timeout(Duration::from_secs(300))

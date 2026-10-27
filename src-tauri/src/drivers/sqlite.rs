@@ -1,5 +1,3 @@
-//! SQLite driver via sqlx.
-
 use crate::error::Result;
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
 use serde_json::Value;
@@ -70,7 +68,6 @@ fn cell_to_json(row: &SqliteRow, idx: usize) -> Value {
             Ok(Some(bytes)) => Value::String(format!("0x{}", hex(&bytes))),
             _ => Value::Null,
         },
-        // TEXT, NUMERIC, DATETIME, and unknowns: try string, then i64/f64.
         _ => match row.try_get::<Option<String>, _>(idx) {
             Ok(Some(s)) => Value::String(s),
             Ok(None) => Value::Null,
@@ -123,7 +120,6 @@ mod tests {
         assert_eq!(res.rows[0][1], serde_json::json!("Ada Lovelace"));
         assert_eq!(res.rows[0][2], serde_json::json!(1815));
 
-        // Various types: REAL and DATE.
         let books = pool
             .execute("SELECT title, price, published FROM books ORDER BY id")
             .await
@@ -158,7 +154,6 @@ mod tests {
         assert!(!title.nullable, "title is NOT NULL");
         assert!(!title.is_primary_key);
 
-        // Foreign keys: books.author_id -> authors.id
         let fks = introspection::list_foreign_keys(&pool, "main")
             .await
             .unwrap();

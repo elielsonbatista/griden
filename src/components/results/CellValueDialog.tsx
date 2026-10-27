@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatCell } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
 import type { Cell } from "@/types";
 
 const BASIC_SETUP = {
@@ -30,7 +31,7 @@ const editorTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
 });
 
-/** Decides the initial representation of the value and whether it's JSON (object/array). */
+/** Strings holding a JSON object or array are treated as JSON too. */
 function analyze(value: Cell): { text: string; isJson: boolean } {
   if (value !== null && typeof value === "object") {
     return { text: JSON.stringify(value, null, 2), isJson: true };
@@ -44,7 +45,7 @@ function analyze(value: Cell): { text: string; isJson: boolean } {
           return { text: JSON.stringify(parsed, null, 2), isJson: true };
         }
       } catch {
-        /* not valid JSON */
+        // Looked like JSON but is not; show it as plain text.
       }
     }
     return { text: value, isJson: false };
@@ -65,7 +66,7 @@ export function CellValueDialog({
   column: string;
   value: Cell;
   editable: boolean;
-  /** Applies the pending change (without running a query). For JSON, receives it already minified. */
+  /** Stages the change without running a query. JSON arrives minified. */
   onApply: (next: string) => void;
 }) {
   const analyzed = useMemo(() => analyze(value), [value]);
@@ -91,7 +92,7 @@ export function CellValueDialog({
   function handleApply() {
     if (analyzed.isJson) {
       try {
-        onApply(JSON.stringify(JSON.parse(text))); // minify before applying
+        onApply(JSON.stringify(JSON.parse(text)));
       } catch {
         toast.error("JSON inválido", { duration: Infinity });
         return;
@@ -100,15 +101,6 @@ export function CellValueDialog({
       onApply(text);
     }
     onOpenChange(false);
-  }
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success("Copiado");
-    } catch {
-      toast.error("Não foi possível copiar", { duration: Infinity });
-    }
   }
 
   return (
@@ -141,7 +133,7 @@ export function CellValueDialog({
 
         <DialogFooter className="gap-2 sm:justify-between">
           <div className="flex gap-2">
-            <Button variant="outline" onClick={copy}>
+            <Button variant="outline" onClick={() => copyText(text)}>
               Copiar
             </Button>
             {analyzed.isJson && (

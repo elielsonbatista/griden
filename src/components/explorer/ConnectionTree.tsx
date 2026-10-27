@@ -4,6 +4,7 @@ import { useEditor } from "@/stores/editor";
 import { api, errMessage } from "@/lib/ipc";
 import { defaultSelect } from "@/lib/query";
 import { openTableTab } from "@/lib/tableTab";
+import { copyText as copyToClipboard } from "@/lib/clipboard";
 import type { ColumnMeta, ConnConfig, SchemaInfo, TableInfo } from "@/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -48,7 +49,7 @@ const KIND_LABEL: Record<ConnConfig["kind"], string> = {
   mssql: "SQL Server",
 };
 
-/** Menu action reused by the dropdown (three dots) and the context menu. */
+/** Shared by the row's dropdown (three dots) and its context menu. */
 interface Action {
   label: string;
   icon: LucideIcon;
@@ -57,16 +58,9 @@ interface Action {
   separatorBefore?: boolean;
 }
 
-async function copyText(text: string, label = "Copiado para a área de transferência") {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success(label);
-  } catch {
-    toast.error("Não foi possível copiar", { duration: Infinity });
-  }
-}
+const copyText = (text: string) =>
+  copyToClipboard(text, "Copiado para a área de transferência");
 
-/** Renders a list of actions as dropdown or context menu items. */
 function MenuActions({
   actions,
   variant,
@@ -107,7 +101,6 @@ function MenuActions({
   );
 }
 
-/** Generic tree row with indentation, chevron, icon, and context menu. */
 function Row({
   depth,
   expandable,
@@ -131,7 +124,6 @@ function Row({
   trailing?: React.ReactNode;
   active?: boolean;
   onClick?: () => void;
-  /** Double click on the label (e.g. open the table's data). */
   onLabelDoubleClick?: () => void;
   /** When set, only the chevron expands/collapses (not the whole row). */
   onToggle?: () => void;
@@ -231,16 +223,19 @@ function ConnectionNode({
     }
   }, [conn.id]);
 
+  async function ensureConnected(): Promise<boolean> {
+    if (isConnected) return true;
+    await connect(conn.id);
+    return useConnections.getState().connected.has(conn.id);
+  }
+
   async function toggle() {
     setActive(conn.id);
     if (expanded) {
       setExpanded(false);
       return;
     }
-    if (!isConnected) {
-      await connect(conn.id);
-      if (!useConnections.getState().connected.has(conn.id)) return; // failed
-    }
+    if (!(await ensureConnected())) return;
     setExpanded(true);
     if (schemas === null) await loadSchemas();
   }
@@ -252,15 +247,11 @@ function ConnectionNode({
   }
 
   async function refresh() {
-    if (!isConnected) {
-      await connect(conn.id);
-      if (!useConnections.getState().connected.has(conn.id)) return;
-    }
+    if (!(await ensureConnected())) return;
     setExpanded(true);
     await loadSchemas();
   }
 
-  // Same actions in the dropdown (three dots) and the context menu (right click).
   const actions: Action[] = [
     isConnected
       ? { label: "Desconectar", icon: PlugZap, onSelect: disconnectAndCollapse }

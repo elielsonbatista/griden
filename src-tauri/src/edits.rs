@@ -1,8 +1,5 @@
-//! SQL generation for inline editing (UPDATE/INSERT/DELETE).
-//!
-//! Values are rendered as SQL literals escaped according to the dialect.
-//! Acceptable for a desktop client where the user edits their own database; a
-//! future evolution may migrate to parameterized queries.
+//! Values are inlined as escaped literals rather than bound parameters: acceptable
+//! for a desktop client editing the user's own database.
 
 use crate::error::{AppError, Result};
 use crate::models::{DbKind, EditOp, RowEdit};
@@ -28,7 +25,6 @@ fn quote_str(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// Renders a JSON value as a SQL literal.
 fn lit(kind: DbKind, v: &Value) -> String {
     match v {
         Value::Null => "NULL".to_string(),
@@ -42,7 +38,6 @@ fn lit(kind: DbKind, v: &Value) -> String {
     }
 }
 
-/// Generates the SQL statement for an edit.
 pub fn build_sql(kind: DbKind, edit: &RowEdit) -> Result<String> {
     let qname = qualified(kind, &edit.schema, &edit.table);
 
@@ -157,7 +152,6 @@ mod tests {
 
     #[tokio::test]
     async fn apply_edits_roundtrip_sqlite() {
-        // Copies the sample database to a writable temporary file.
         let src = concat!(env!("CARGO_MANIFEST_DIR"), "/../.dev/sample.db");
         let dst = concat!(env!("CARGO_MANIFEST_DIR"), "/../.dev/edits_test.db");
         let _ = std::fs::remove_file(dst);
@@ -165,7 +159,6 @@ mod tests {
 
         let pool = AnyPool::connect(&cfg(dst), None, 5).await.unwrap();
 
-        // UPDATE
         let mut pk = HashMap::new();
         pk.insert("id".to_string(), serde_json::json!(1));
         let mut values = HashMap::new();
@@ -188,7 +181,6 @@ mod tests {
             .unwrap();
         assert_eq!(res.rows[0][0], serde_json::json!("Ada L."));
 
-        // INSERT
         let mut ins_vals = HashMap::new();
         ins_vals.insert("id".to_string(), serde_json::json!(99));
         ins_vals.insert("name".to_string(), serde_json::json!("New Author"));
@@ -203,7 +195,6 @@ mod tests {
             .await
             .unwrap();
 
-        // DELETE
         let mut del_pk = HashMap::new();
         del_pk.insert("id".to_string(), serde_json::json!(99));
         let del = RowEdit {
@@ -218,7 +209,6 @@ mod tests {
             .unwrap();
 
         let count = pool.execute("SELECT COUNT(*) FROM authors").await.unwrap();
-        // 2 originals (update does not change the count), insert +1, delete -1 => 2
         assert_eq!(count.rows[0][0], serde_json::json!(2));
 
         pool.close().await;
