@@ -33,7 +33,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const connections = await api.listConnections();
       set({ connections, loaded: true });
     } catch (e) {
-      toast.error("Falha ao carregar conexões", { description: errMessage(e) });
+      toast.error("Falha ao carregar conexões", { description: errMessage(e), duration: Infinity });
       set({ loaded: true });
     }
   },
@@ -44,7 +44,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       await get().load();
       return saved;
     } catch (e) {
-      toast.error("Falha ao salvar conexão", { description: errMessage(e) });
+      toast.error("Falha ao salvar conexão", { description: errMessage(e), duration: Infinity });
       return null;
     }
   },
@@ -62,7 +62,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         };
       });
     } catch (e) {
-      toast.error("Falha ao excluir conexão", { description: errMessage(e) });
+      toast.error("Falha ao excluir conexão", { description: errMessage(e), duration: Infinity });
     }
   },
 
@@ -75,7 +75,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         activeId: id,
       }));
     } catch (e) {
-      toast.error("Falha ao conectar", { description: errMessage(e) });
+      toast.error("Falha ao conectar", { description: errMessage(e), duration: Infinity });
     } finally {
       set((s) => {
         const busy = new Set(s.busy);

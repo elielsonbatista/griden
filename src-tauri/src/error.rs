@@ -19,6 +19,9 @@ pub enum AppError {
     #[error("erro de banco: {0}")]
     Database(String),
 
+    #[error("execução cancelada pelo usuário")]
+    Cancelled,
+
     #[error("erro no keychain: {0}")]
     Keyring(String),
 

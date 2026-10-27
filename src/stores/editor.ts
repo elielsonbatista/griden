@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { toast } from "sonner";
 import { api, errMessage } from "@/lib/ipc";
 import { useConnections } from "@/stores/connections";
 import { splitStatements } from "@/lib/sqlStatements";
@@ -67,6 +68,8 @@ interface EditorState {
   run: (id: string, sqlOverride?: string) => Promise<void>;
   /** Runs each statement of the tab's SQL, in sequence, stopping at the first error. */
   runAll: (id: string) => Promise<void>;
+  /** Requests cancellation of the query currently running for this tab's connection. */
+  cancel: (id: string) => Promise<void>;
 }
 
 type PersistedTab = Pick<
@@ -252,6 +255,19 @@ export const useEditor = create<EditorState>()(
           ),
           history: [...newHistory, ...s.history].slice(0, 200),
         }));
+      },
+
+      async cancel(id) {
+        const tab = get().tabs.find((t) => t.id === id);
+        if (!tab || !tab.running) return;
+        // The actual cancellation result (or success) surfaces through the
+        // in-flight run()/runAll() call on its own; this only reports when
+        // the cancel request itself couldn't be issued (e.g. no session id).
+        try {
+          await api.cancelQuery(tab.connId);
+        } catch (e) {
+          toast.error("Falha ao cancelar", { description: errMessage(e), duration: Infinity });
+        }
       },
     }),
     {

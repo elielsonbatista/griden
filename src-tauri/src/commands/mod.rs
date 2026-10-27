@@ -49,8 +49,12 @@ where
     F: Fn(Arc<AnyPool>) -> Fut,
     Fut: Future<Output = Result<T>>,
 {
+    mgr.clear_cancelled(id).await;
     let pool = mgr.get_exec_pool(id).await?;
     match op(pool).await {
+        // Checked before is_connection_lost(): a user cancel (e.g. mssql's KILL)
+        // can itself surface as a dropped connection, which must not be retried.
+        Err(_) if mgr.take_cancelled(id).await => Err(AppError::Cancelled),
         Err(e) if e.is_connection_lost() => {
             mgr.reconnect(id)
                 .await
@@ -60,6 +64,7 @@ where
                 .await
                 .map_err(|_| AppError::Database("Connection lost".into()))?;
             match op(pool).await {
+                Err(_) if mgr.take_cancelled(id).await => Err(AppError::Cancelled),
                 Err(e) if e.is_connection_lost() => {
                     Err(AppError::Database("Connection lost".into()))
                 }
@@ -117,6 +122,14 @@ pub async fn run_query(
         async move { pool.execute(&sql).await }
     })
     .await
+}
+
+/// Aborts the statement currently running via `run_query`/`apply_edits` on
+/// this connection's exec pool. Not supported for SQLite (no separate session
+/// to cancel from); returns an error in that case.
+#[tauri::command]
+pub async fn cancel_query(mgr: State<'_, ConnectionManager>, id: String) -> Result<()> {
+    mgr.cancel_exec(&id).await
 }
 
 #[tauri::command]

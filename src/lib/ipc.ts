@@ -38,6 +38,9 @@ export const api = {
   runQuery(id: string, sql: string): Promise<QueryResult> {
     return invoke("run_query", { id, sql });
   },
+  cancelQuery(id: string): Promise<void> {
+    return invoke("cancel_query", { id });
+  },
   getSchemas(id: string): Promise<SchemaInfo[]> {
     return invoke("get_schemas", { id });
   },
