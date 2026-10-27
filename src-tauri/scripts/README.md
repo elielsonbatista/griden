@@ -2,7 +2,7 @@
 
 Every `cargo build` produces a fresh unsigned binary; macOS derives an ad-hoc
 identity from it on first run, so the Keychain "Always Allow" you grant for
-saved connection passwords doesn't survive the next rebuild — you get
+saved connection passwords doesn't survive the next rebuild, so you get
 re-prompted every time.
 
 `macos-dev-runner.sh` (wired up as the cargo `runner` for macOS in
@@ -14,7 +14,7 @@ and the Keychain stops re-prompting.
 
 Run `sh src-tauri/scripts/setup-dev-cert.sh` and approve the system trust
 prompt it triggers (macOS requires that confirmation for any code-signing
-identity; the script can't skip it). Done — `pnpm tauri dev` / `cargo run`
+identity; the script can't skip it). Done: `pnpm tauri dev` / `cargo run`
 will sign with it automatically from now on.
 
 Prefer doing it by hand? Open **Keychain Access** → menu **Keychain Access →
@@ -23,7 +23,7 @@ Certificate Assistant → Create a Certificate…**. Name: `Griden Dev` (or set
 Signed Root**. Certificate Type: **Code Signing**.
 
 Without this certificate the runner just runs the binary unsigned, same as
-today — nothing breaks if you skip this step.
+today; nothing breaks if you skip this step.
 
 ## `tauri build` (release bundle)
 

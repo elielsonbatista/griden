@@ -1,5 +1,3 @@
-//! PostgreSQL driver via sqlx.
-
 use crate::error::{AppError, Result};
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
 use serde_json::Value;
@@ -24,18 +22,14 @@ pub async fn connect(
     if let Some(pw) = password {
         opts = opts.password(pw);
     }
-    // SSL checked => requires TLS (without verifying the hostname, fine via a tunnel).
-    // SSL unchecked => actually disables TLS (not just "prefer"), avoiding a
-    // HandshakeFailure when connecting over plaintext (e.g. through an SSH tunnel).
+    // Disable, not Prefer: plaintext servers behind an SSH tunnel fail the TLS handshake.
     opts = opts.ssl_mode(if cfg.ssl {
         sqlx::postgres::PgSslMode::Require
     } else {
         sqlx::postgres::PgSslMode::Disable
     });
 
-    // Probe: a single connection that fails fast on "connection refused".
-    // (The pool on its own would retry until acquire_timeout — hence the long loading.)
-    // The timeout covers the case of an unreachable host (SYN with no response).
+    // A single probe fails fast; the pool would retry until acquire_timeout.
     let probe = sqlx::PgConnection::connect_with(&opts);
     match tokio::time::timeout(Duration::from_secs(10), probe).await {
         Ok(Ok(conn)) => {
@@ -49,13 +43,11 @@ pub async fn connect(
         }
     }
 
-    // Lazy pool: connections are created on demand (the server is already validated).
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
-        // Avoids a validation round-trip on every query (costly over an SSH tunnel).
-        // In exchange, recycles connections to reduce stale ones; an automatic
-        // retry (AnyPool::execute) covers any that still slip through.
+        // Skips a round-trip per query (costly over SSH); recycling plus the retry
+        // in `AnyPool::execute` covers stale connections.
         .test_before_acquire(false)
         .max_lifetime(Duration::from_secs(1800))
         .idle_timeout(Duration::from_secs(300))
@@ -124,7 +116,6 @@ fn cell_to_json(row: &PgRow, idx: usize) -> Value {
             Ok(Some(bytes)) => Value::String(format!("\\x{}", hex(&bytes))),
             _ => Value::Null,
         },
-        // TEXT, VARCHAR, BPCHAR, NAME, and unknowns: try string.
         _ => json_string_opt(row.try_get::<Option<String>, _>(idx)),
     }
 }

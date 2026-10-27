@@ -1,14 +1,9 @@
 import { api } from "@/lib/ipc";
 import { useEditor } from "@/stores/editor";
 import { buildTableQuery, defaultSelect, type FilterCondition } from "@/lib/query";
-import type { DbKind, ForeignKey } from "@/types";
+import type { DbKind } from "@/types";
 
-/**
- * Opens a "data view" tab (filter bar + grid) for a table. Fetches the PK
- * (for inline editing) and the foreign keys (for navigation) and, optionally,
- * applies initial filters (e.g. when navigating an FK). Used both by
- * double-clicking a table and by clicking an FK cell.
- */
+/** A table without a primary key opens read-only; metadata failures degrade, never block. */
 export async function openTableTab(params: {
   connId: string;
   connName: string;
@@ -19,21 +14,12 @@ export async function openTableTab(params: {
 }): Promise<void> {
   const { connId, connName, kind, schema, table, filters } = params;
 
-  let pkColumns: string[] = [];
-  try {
-    const cols = await api.getColumns(connId, schema, table);
-    pkColumns = cols.filter((c) => c.isPrimaryKey).map((c) => c.name);
-  } catch {
-    /* no columns/PK -> non-editable grid */
-  }
-
-  let fks: ForeignKey[] = [];
-  try {
-    const all = await api.getForeignKeys(connId, schema);
-    fks = all.filter((f) => f.fromTable === table);
-  } catch {
-    /* no FKs */
-  }
+  const [cols, allFks] = await Promise.all([
+    api.getColumns(connId, schema, table).catch(() => []),
+    api.getForeignKeys(connId, schema).catch(() => []),
+  ]);
+  const pkColumns = cols.filter((c) => c.isPrimaryKey).map((c) => c.name);
+  const fks = allFks.filter((f) => f.fromTable === table);
 
   const editable = pkColumns.length > 0 ? { schema, table, pkColumns } : undefined;
   const sql =

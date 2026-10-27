@@ -1,6 +1,6 @@
 # Contributing to Griden
 
-Thanks for your interest in contributing! 🎉
+Thanks for your interest in contributing!
 
 ## Environment
 
@@ -16,20 +16,10 @@ pnpm install
 pnpm tauri dev
 ```
 
-## Project layout
+## Architecture and conventions
 
-- `src/` — React frontend (Vite + Tailwind + shadcn).
-  - `components/` — UI by area (`connections`, `explorer`, `editor`, `results`, `erd`).
-  - `stores/` — global state (Zustand).
-  - `lib/ipc.ts` — typed wrappers over the Tauri commands.
-  - `types/` — types mirroring the Rust structs.
-- `src-tauri/src/` — Rust backend.
-  - `drivers/` — `AnyPool` + one file per backend (pg/mysql/sqlite/mssql).
-  - `introspection.rs` — schema metadata and foreign keys per dialect.
-  - `edits.rs` — SQL generation for inline editing.
-  - `connection.rs` — connection manager + keychain + SSH tunnel.
-  - `tunnel.rs` — SSH tunnel (port-forwarding via russh) for connections over SSH.
-  - `commands/` — `#[tauri::command]` commands.
+Read [`GRIDEN.md`](GRIDEN.md) before making changes. It is the living architecture doc:
+project layout, connection lifecycle, coding conventions, the quality bar and known gotchas.
 
 ## Before opening a PR
 
@@ -37,7 +27,7 @@ pnpm tauri dev
 pnpm lint            # tsc --noEmit
 pnpm build           # frontend build
 cargo fmt --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo test  --manifest-path src-tauri/Cargo.toml
 ```
 
@@ -63,11 +53,7 @@ PY
 
 ## Adding support for a new database
 
-1. Create `src-tauri/src/drivers/<new>.rs` with `connect` and `execute` (decode → `serde_json::Value`).
-2. Add the variant to `AnyPool` (`drivers/mod.rs`) and to `DbKind` (`models.rs`).
-3. Implement the introspection queries in `introspection.rs`.
-4. Handle identifier quoting in `edits.rs`.
-5. Add the type on the frontend (`src/types/index.ts`, `DB_KINDS`).
+See "Adding a database" in [`GRIDEN.md`](GRIDEN.md).
 
 ## License
 

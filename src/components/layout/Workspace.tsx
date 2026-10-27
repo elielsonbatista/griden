@@ -1,9 +1,6 @@
-import type { ActivityView } from "@/App";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
+import { lazy, Suspense, memo, useMemo, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
 import {
   Grid3x3,
   Play,
@@ -17,46 +14,38 @@ import {
   Copy,
   Square,
 } from "lucide-react";
-import { toCsv, toJson, toTsv, toMarkdown } from "@/lib/export";
-import { FilterBar, emptyFilterRow, type FilterRow } from "@/components/results/FilterBar";
-import { buildTableQuery, type FilterCondition } from "@/lib/query";
-import { listen } from "@tauri-apps/api/event";
-import { api, errMessage } from "@/lib/ipc";
-import { toast } from "sonner";
+import type { ActivityView } from "@/App";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Cell, QueryResult } from "@/types";
-import { openTableTab } from "@/lib/tableTab";
-import { shortcutLabel } from "@/lib/platform";
-
-const DOWNLOAD_FORMATS: {
-  label: string;
-  ext: string;
-  build: (r: QueryResult) => string;
-}[] = [
-  { label: "CSV", ext: "csv", build: toCsv },
-  { label: "JSON", ext: "json", build: toJson },
-  { label: "TSV", ext: "tsv", build: toTsv },
-  { label: "Markdown", ext: "md", build: toMarkdown },
-];
-import { useConnections } from "@/stores/connections";
-import { useEditor } from "@/stores/editor";
+import { Button } from "@/components/ui/button";
 import { SqlEditor, type SqlEditorHandle } from "@/components/editor/SqlEditor";
 import { ResultsGrid } from "@/components/results/ResultsGrid";
+import { FilterBar, emptyFilterRow, type FilterRow } from "@/components/results/FilterBar";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
-import { lazy, Suspense, memo, useMemo, useEffect, useRef, useState } from "react";
+import { useConnections } from "@/stores/connections";
+import { useEditor } from "@/stores/editor";
+import { EXPORT_FORMATS } from "@/lib/export";
+import { buildTableQuery, type RelatedTarget } from "@/lib/query";
+import { api, errMessage } from "@/lib/ipc";
+import { copyText } from "@/lib/clipboard";
+import { openTableTab } from "@/lib/tableTab";
+import { shortcutLabel } from "@/lib/platform";
+import { cn } from "@/lib/utils";
+import type { DbKind } from "@/types";
 
-// ERD loads react-flow + elkjs (heavy) only when opened.
+// react-flow + elkjs are heavy; load them only when the ERD is opened.
 const ErdView = lazy(() =>
   import("@/components/erd/ErdView").then((m) => ({ default: m.ErdView })),
 );
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { DbKind } from "@/types";
 
 export function Workspace({ view }: { view: ActivityView }) {
   if (view === "erd") {
@@ -100,8 +89,7 @@ function EditorWorkspace() {
 
   const canOpen = !!activeConnId && connected.has(activeConnId);
 
-  // Ctrl+W (Cmd+W on macOS) closes the active tab, like in browsers.
-  // In the capture phase so it runs before CodeMirror/inputs can consume the event.
+  // Capture phase, so CodeMirror and inputs cannot swallow the shortcut first.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
@@ -117,8 +105,7 @@ function EditorWorkspace() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  // On Linux, WebKitGTK consumes Ctrl+W before the JS; the backend intercepts it
-  // and emits "close-tab". (On mac/Windows the keyboard listener above already handles it.)
+  // On Linux, WebKitGTK swallows Ctrl+W; lib.rs intercepts it and emits "close-tab".
   useEffect(() => {
     const unlisten = listen("close-tab", () => {
       const { activeTabId: id, closeTab: close } = useEditor.getState();
@@ -131,16 +118,15 @@ function EditorWorkspace() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Tab bar */}
       <div className="flex h-9 items-center border-b bg-sidebar">
         <div className="flex h-full flex-1 items-stretch overflow-x-auto">
           {tabs.map((t) => (
             <div
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              // Middle click (scroll button) closes the tab, like in browsers.
               onMouseDown={(e) => {
-                if (e.button === 1) e.preventDefault(); // prevents middle-click autoscroll
+                // Middle click would otherwise start autoscroll.
+                if (e.button === 1) e.preventDefault();
               }}
               onAuxClick={(e) => {
                 if (e.button === 1) {
@@ -148,13 +134,11 @@ function EditorWorkspace() {
                   closeTab(t.id);
                 }
               }}
-              // Drag to reorder the tabs (like in browsers).
               draggable
               onDragStart={(e) => {
                 setDraggingId(t.id);
                 e.dataTransfer.effectAllowed = "move";
-                // Needed for webkit (Tauri's webview) to treat the drag as
-                // valid and fire dragenter/dragover/drop.
+                // WebKit ignores a drag without data and never fires dragenter/drop.
                 e.dataTransfer.setData("text/plain", t.id);
               }}
               onDragEnter={() => {
@@ -242,7 +226,6 @@ function TabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   );
 }
 
-/** "Executar" bar + SQL editor. `leading` lets you inject a button on the left. */
 function EditorPane({
   tabId,
   kind,
@@ -329,10 +312,9 @@ function EditorPane({
   );
 }
 
-/** Tab opened from a table: filter bar + grid (with a toggle to SQL). */
 function TableTabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   const [mode, setMode] = useState<"filter" | "sql">("filter");
-  // Conditions kept here (not in FilterBar) so they survive the SQL toggle.
+  // Lives here, not in FilterBar, so the conditions survive toggling to SQL mode.
   const [filterRows, setFilterRows] = useState<FilterRow[]>(() => {
     const init = useEditor.getState().tabs.find((t) => t.id === tabId)?.initialFilters;
     return init && init.length
@@ -397,8 +379,7 @@ function TableTabContent({ tabId, kind }: { tabId: string; kind: DbKind }) {
   );
 }
 
-// Memoized and with granular selectors: re-renders only when the RESULT changes,
-// not on every keystroke in the editor (the grid can be heavy).
+// Memoized with granular selectors so editor keystrokes never re-render the grid.
 const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
   const result = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.result ?? null);
   const error = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.error ?? null);
@@ -418,29 +399,10 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
     [editableSrc, connId, hasGrid],
   );
 
-  // Opens the records referenced by an FK as a data view (filter bar),
-  // with the FK condition(s) already pre-applied.
   const onOpenRelated = useMemo(
-    () =>
-      (target: {
-        schema: string;
-        table: string;
-        conditions: { col: string; value: Cell }[];
-      }) => {
-        const filters: FilterCondition[] = target.conditions.map((c) =>
-          c.value === null
-            ? { column: c.col, op: "isnull", value: "" }
-            : { column: c.col, op: "=", value: String(c.value) },
-        );
-        void openTableTab({
-          connId,
-          connName,
-          kind,
-          schema: target.schema,
-          table: target.table,
-          filters,
-        });
-      },
+    () => (target: RelatedTarget) => {
+      void openTableTab({ connId, connName, kind, ...target });
+    },
     [kind, connId, connName],
   );
 
@@ -461,7 +423,7 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {DOWNLOAD_FORMATS.map((fmt) => (
+                {EXPORT_FORMATS.map((fmt) => (
                   <DropdownMenuItem
                     key={fmt.ext}
                     onSelect={async () => {
@@ -501,10 +463,7 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
             <button
               className="absolute top-2 right-2 text-destructive/70 hover:text-destructive"
               title="Copiar erro"
-              onClick={async () => {
-                await navigator.clipboard.writeText(error);
-                toast.success("Erro copiado");
-              }}
+              onClick={() => copyText(error, "Erro copiado")}
             >
               <Copy className="h-3.5 w-3.5" />
             </button>

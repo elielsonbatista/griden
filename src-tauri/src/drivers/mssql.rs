@@ -1,7 +1,5 @@
-//! Microsoft SQL Server driver via tiberius.
-//!
-//! tiberius has no native pool; we keep a single `Client` guarded by a
-//! `Mutex` (suitable for a desktop client). Queries serialize on one connection.
+//! tiberius has no pool, so each `AnyPool::Mssql` is one client behind a `Mutex`
+//! and its queries serialize.
 
 use crate::error::Result;
 use crate::models::{ColumnInfo, ConnConfig, QueryResult};
@@ -29,7 +27,7 @@ pub async fn connect(cfg: &ConnConfig, password: Option<&str>) -> Result<MssqlCl
     } else {
         EncryptionLevel::NotSupported
     });
-    // Trusts self-signed certificates (common in dev/local environments).
+    // Self-signed certificates are the norm on dev/local SQL Server instances.
     config.trust_cert();
 
     // The timeout covers an unreachable host; "connection refused" fails immediately.
@@ -111,7 +109,6 @@ fn cell_to_json(row: &tiberius::Row, i: usize, ct: ColumnType) -> Value {
             Ok(Some(b)) => Value::String(format!("0x{}", hex(b))),
             _ => Value::Null,
         },
-        // NVarchar, NChar, BigVarChar, BigChar, Text, NText, Xml, etc.
         _ => match row.try_get::<&str, _>(i) {
             Ok(Some(s)) => Value::String(s.to_string()),
             _ => Value::Null,

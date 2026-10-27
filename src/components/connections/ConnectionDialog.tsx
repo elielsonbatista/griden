@@ -261,7 +261,6 @@ export function ConnectionDialog({
                 Usar SSL/TLS
               </label>
 
-              {/* SSH tunnel */}
               <div className="mt-1 border-t pt-3">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <input

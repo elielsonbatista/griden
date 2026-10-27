@@ -1,6 +1,4 @@
-//! Per-dialect schema introspection. Built on top of `AnyPool::execute`,
-//! reusing the dynamic row decoding. The meta-queries take schema/table names
-//! as literals; they are escaped via `quote` to prevent injection.
+//! Schema and table names are inlined into the meta-queries, always through `quote`.
 
 use crate::drivers::AnyPool;
 use crate::error::Result;
@@ -10,7 +8,6 @@ use crate::models::{
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Escapes a SQL string literal by doubling single quotes.
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
@@ -226,13 +223,10 @@ async fn list_columns_mssql(pool: &AnyPool, schema: &str, table: &str) -> Result
     Ok(rows_to_columns(&res))
 }
 
-// ----- All columns of the schema in a single query (ERD) -----
-
-/// Loads the columns of ALL tables in the schema at once. Avoids the N+1
-/// (one query per table) that exhausts the pool on large schemas.
+/// One query for the whole schema: one per table exhausts the pool on large schemas.
 pub async fn list_all_columns(pool: &AnyPool, schema: &str) -> Result<Vec<TableColumns>> {
     if pool.kind() == DbKind::Sqlite {
-        // SQLite has no information_schema; uses PRAGMA per table (local and fast).
+        // No information_schema; PRAGMA per table is cheap on a local file.
         let tables = list_tables(pool, "main").await?;
         let mut out = Vec::with_capacity(tables.len());
         for t in tables {
@@ -327,8 +321,6 @@ pub async fn list_all_columns(pool: &AnyPool, schema: &str) -> Result<Vec<TableC
     Ok(out)
 }
 
-// ----- Foreign keys (ERD) -----
-
 pub async fn list_foreign_keys(pool: &AnyPool, schema: &str) -> Result<Vec<ForeignKey>> {
     if pool.kind() == DbKind::Sqlite {
         return list_foreign_keys_sqlite(pool).await;
@@ -373,8 +365,7 @@ pub async fn list_foreign_keys(pool: &AnyPool, schema: &str) -> Result<Vec<Forei
     Ok(group_fks(&res))
 }
 
-/// Groups rows [name, from_schema, from_table, from_col, to_schema, to_table, to_col]
-/// by constraint_name, preserving the column order.
+/// Rows: name, from_schema, from_table, from_col, to_schema, to_table, to_col.
 fn group_fks(res: &crate::models::QueryResult) -> Vec<ForeignKey> {
     let mut order: Vec<String> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();

@@ -1,4 +1,3 @@
-// Typed wrappers around Tauri's `invoke()`.
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ColumnMeta,
@@ -59,13 +58,13 @@ export const api = {
   applyEdits(id: string, edits: RowEdit[]): Promise<EditResult> {
     return invoke("apply_edits", { id, changes: edits });
   },
-  /** Opens the native save dialog and writes the content. Returns false if cancelled. */
+  /** Resolves `false` if the user cancels the save dialog. */
   saveFile(defaultName: string, content: string): Promise<boolean> {
     return invoke("save_file", { defaultName, content });
   },
 };
 
-/** Normalizes errors coming from the backend (which arrive as a serialized string). */
+/** Backend errors arrive as plain strings (`AppError` serializes to its message). */
 export function errMessage(e: unknown): string {
   if (typeof e === "string") return e;
   if (e instanceof Error) return e.message;

@@ -1,10 +1,3 @@
-//! Database driver layer.
-//!
-//! `AnyPool` is the central abstraction: an enum over each backend's pool
-//! (sqlx for pg/mysql/sqlite, tiberius for mssql) with dispatch per variant.
-//! All row decoding converts to `serde_json::Value`, keeping the result
-//! agnostic of static types.
-
 pub mod mssql;
 pub mod mysql;
 pub mod postgres;
@@ -15,7 +8,6 @@ use crate::models::{ConnConfig, DbKind, QueryResult};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Live pool/connection for an open connection.
 pub enum AnyPool {
     Postgres(sqlx::PgPool),
     Mysql(sqlx::MySqlPool),
@@ -24,8 +16,7 @@ pub enum AnyPool {
 }
 
 impl AnyPool {
-    /// Opens a connection according to the database kind. `max_connections`
-    /// only applies to pg/mysql/sqlite (mssql is already a single connection).
+    /// `max_connections` is ignored for mssql, which has no pool.
     pub async fn connect(
         cfg: &ConnConfig,
         password: Option<&str>,
@@ -54,7 +45,6 @@ impl AnyPool {
         }
     }
 
-    /// Checks whether the connection is alive.
     pub async fn ping(&self) -> Result<()> {
         match self {
             AnyPool::Postgres(p) => {
@@ -78,9 +68,8 @@ impl AnyPool {
         Ok(())
     }
 
-    /// Executes a SQL statement and returns the agnostic result. Retries once if
-    /// the first attempt fails due to a stale connection (the server/tunnel closed
-    /// the pool's idle connection); the pool discards the dead one and opens a new one.
+    /// Retries once on a stale pooled connection (closed idle by the server or tunnel);
+    /// the pool discards it and opens a fresh one.
     pub async fn execute(&self, sql: &str) -> Result<QueryResult> {
         match self.execute_once(sql).await {
             Err(e) if e.is_connection_lost() => self.execute_once(sql).await,
@@ -100,10 +89,8 @@ impl AnyPool {
         }
     }
 
-    /// Executes several statements in a transaction, returning the total number of
-    /// affected rows. Rolls back if any statement fails. Retries once on a stale
-    /// connection — safe because, if the connection dropped, the transaction was
-    /// never committed (nothing was applied).
+    /// The retry on a stale connection is safe: a transaction that died before
+    /// commit applied nothing.
     pub async fn execute_tx(&self, statements: &[String]) -> Result<u64> {
         match self.execute_tx_once(statements).await {
             Err(e) if e.is_connection_lost() => self.execute_tx_once(statements).await,
@@ -159,9 +146,7 @@ impl AnyPool {
         }
     }
 
-    /// Identifies the physical session backing this connection, for later
-    /// cancellation via `cancel_session` from a *different* connection. `None`
-    /// when the backend has no such concept (sqlite) or the lookup fails.
+    /// `None` for sqlite or when the lookup fails, which disables cancellation.
     pub async fn session_id(&self) -> Option<i64> {
         match self {
             AnyPool::Postgres(p) => sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
@@ -193,10 +178,8 @@ impl AnyPool {
         }
     }
 
-    /// Aborts whatever statement is currently running on the session identified
-    /// by `session_id` (obtained via `session_id()` on that other connection).
-    /// Must be called on a connection distinct from the one being cancelled —
-    /// it is busy running the statement and can't service this request itself.
+    /// Must run on a different connection than the one being cancelled, which is
+    /// busy running the statement.
     pub async fn cancel_session(&self, session_id: i64) -> Result<()> {
         match self {
             AnyPool::Postgres(p) => {
@@ -219,22 +202,21 @@ impl AnyPool {
             }
             AnyPool::Mssql(c) => {
                 let mut client = c.lock().await;
-                // No equivalent to "cancel just the statement": KILL ends the whole
-                // session, which surfaces as a connection-lost error on the exec
-                // side — `with_reconnect_exec` reconnects it transparently.
+                // No statement-only cancel: KILL ends the session, and
+                // `with_reconnect_exec` reopens it.
                 client.simple_query(format!("KILL {session_id}")).await?;
             }
         }
         Ok(())
     }
 
-    /// Closes the connection, releasing resources.
     pub async fn close(&self) {
         match self {
             AnyPool::Postgres(p) => p.close().await,
             AnyPool::Mysql(p) => p.close().await,
             AnyPool::Sqlite(p) => p.close().await,
-            AnyPool::Mssql(_) => { /* tiberius closes on drop */ }
+            // tiberius closes the client on drop.
+            AnyPool::Mssql(_) => {}
         }
     }
 }

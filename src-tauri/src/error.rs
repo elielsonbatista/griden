@@ -1,6 +1,3 @@
-//! Central error type. Implements `Serialize` to cross Tauri's IPC boundary
-//! as a friendly string.
-
 use serde::{Serialize, Serializer};
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -41,9 +38,8 @@ pub enum AppError {
 impl From<sqlx::Error> for AppError {
     fn from(e: sqlx::Error) -> Self {
         let msg = e.to_string();
-        // The "HandshakeFailure" TLS alert is cryptic: it usually means the
-        // server does not speak compatible TLS on the port in use. Over an SSH
-        // tunnel, the right move is to uncheck SSL (SSH already encrypts).
+        // "HandshakeFailure" usually means the server offers no TLS on that port,
+        // typically behind an SSH tunnel, where SSL should be off.
         if msg.contains("HandshakeFailure") || msg.contains("handshake") {
             return AppError::Database(format!(
                 "{msg} — falha no handshake TLS. Se estiver usando túnel SSH ou \

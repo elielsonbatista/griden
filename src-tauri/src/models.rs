@@ -1,9 +1,7 @@
-//! Serde types shared between the Rust backend and the frontend.
-//! These structs are mirrored in `src/types/` on the frontend.
+//! Mirrored in `src/types/index.ts`; keep both sides in sync.
 
 use serde::{Deserialize, Serialize};
 
-/// Supported database type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DbKind {
@@ -14,7 +12,6 @@ pub enum DbKind {
     Mssql,
 }
 
-/// Authentication method for the SSH server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SshAuthKind {
@@ -23,28 +20,25 @@ pub enum SshAuthKind {
     Key,
 }
 
-/// Persisted connection configuration (NEVER contains the password — that lives in the keychain).
+/// Persisted to disk, so it must never hold a secret; those live in the keychain.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnConfig {
     pub id: String,
     pub name: String,
     pub kind: DbKind,
-    /// Host/IP (ignored for sqlite).
     #[serde(default)]
     pub host: Option<String>,
     #[serde(default)]
     pub port: Option<u16>,
-    /// Database name (sqlite: file path).
+    /// For sqlite, the database file path.
     #[serde(default)]
     pub database: Option<String>,
     #[serde(default)]
     pub username: Option<String>,
-    /// Enables TLS/SSL on the connection.
     #[serde(default)]
     pub ssl: bool,
 
-    // --- SSH tunnel (optional; ignored for sqlite). Secrets live in the keychain. ---
     #[serde(default)]
     pub ssh_enabled: bool,
     #[serde(default)]
@@ -59,12 +53,11 @@ pub struct ConnConfig {
     pub ssh_key_path: Option<String>,
 }
 
-/// Create/edit payload coming from the frontend (may carry the password in plain
-/// text, which is moved to the keychain and never persisted to the config file).
+/// May carry plaintext secrets; `ConnectionManager::save_config` moves them to the keychain.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnInput {
-    /// When absent, a new connection is created with a generated id.
+    /// `None` creates a new connection.
     #[serde(default)]
     pub id: Option<String>,
     pub name: String,
@@ -82,7 +75,6 @@ pub struct ConnInput {
     #[serde(default)]
     pub ssl: bool,
 
-    // --- SSH tunnel ---
     #[serde(default)]
     pub ssh_enabled: bool,
     #[serde(default)]
@@ -101,7 +93,6 @@ pub struct ConnInput {
     pub ssh_passphrase: Option<String>,
 }
 
-/// Metadata for a column in a query result.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnInfo {
@@ -109,8 +100,6 @@ pub struct ColumnInfo {
     pub type_name: String,
 }
 
-/// Driver-agnostic query result. Cells are `serde_json::Value` to
-/// decouple from each driver's static types.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryResult {
@@ -131,8 +120,6 @@ impl QueryResult {
     }
 }
 
-// ----- Inline editing -----
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EditOp {
@@ -141,8 +128,6 @@ pub enum EditOp {
     Delete,
 }
 
-/// A row edit coming from the grid. `pk` locates the row (update/delete);
-/// `values` carries the new values (update/insert).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RowEdit {
@@ -160,8 +145,6 @@ pub struct RowEdit {
 pub struct EditResult {
     pub affected: u64,
 }
-
-// ----- Introspection (used in the schema browser and ERD; populated starting from M3) -----
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,7 +178,6 @@ pub struct ColumnMeta {
     pub ordinal: i32,
 }
 
-/// Columns of a table (used to load the entire schema at once in the ERD).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableColumns {
