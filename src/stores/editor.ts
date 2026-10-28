@@ -6,6 +6,7 @@ import { useConnections } from "@/stores/connections";
 import { splitStatements } from "@/lib/sqlStatements";
 import type { ForeignKey, QueryResult } from "@/types";
 import type { FilterCondition } from "@/lib/query";
+import { withColumnWidth, type ColumnWidths } from "@/lib/columnWidths";
 
 let idSeq = 1;
 let queryTitleSeq = 1;
@@ -32,6 +33,7 @@ export interface QueryTab {
   /** Present when the tab is a table data view rather than a SQL editor. */
   source?: { schema: string; table: string };
   initialFilters?: FilterCondition[];
+  columnWidths?: ColumnWidths;
 }
 
 export interface HistoryEntry {
@@ -63,6 +65,8 @@ interface EditorState {
   moveTab: (draggedId: string, targetId: string) => void;
   setActiveTab: (id: string) => void;
   setSql: (id: string, sql: string) => void;
+  /** `null` resets the column to the default width. */
+  setColumnWidth: (id: string, column: string, width: number | null) => void;
   run: (id: string, sqlOverride?: string) => Promise<void>;
   /** Stops at the first failing statement. */
   runAll: (id: string) => Promise<void>;
@@ -80,6 +84,7 @@ type PersistedTab = Pick<
   | "foreignKeys"
   | "source"
   | "initialFilters"
+  | "columnWidths"
 >;
 
 function historyEntry(connId: string, sql: string, result: QueryResult | null): HistoryEntry {
@@ -159,6 +164,16 @@ export const useEditor = create<EditorState>()(
       setSql(id, sql) {
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === id ? { ...t, sql } : t)),
+        }));
+      },
+
+      setColumnWidth(id, column, width) {
+        set((s) => ({
+          tabs: s.tabs.map((t) =>
+            t.id === id
+              ? { ...t, columnWidths: withColumnWidth(t.columnWidths, column, width) }
+              : t,
+          ),
         }));
       },
 
@@ -258,7 +273,19 @@ export const useEditor = create<EditorState>()(
             foreignKeys,
             source,
             initialFilters,
-          }) => ({ id, connId, connName, title, sql, editable, foreignKeys, source, initialFilters }),
+            columnWidths,
+          }) => ({
+            id,
+            connId,
+            connName,
+            title,
+            sql,
+            editable,
+            foreignKeys,
+            source,
+            initialFilters,
+            columnWidths,
+          }),
         ),
       }),
       merge: (persistedState, currentState) => {
