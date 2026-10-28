@@ -13,6 +13,13 @@ import {
   type EditMap,
 } from "@/lib/edits";
 import { relatedTarget, type RelatedTarget } from "@/lib/query";
+import {
+  clampColumnWidth,
+  columnVar,
+  columnWidth,
+  gridWidth,
+  type ColumnWidths,
+} from "@/lib/columnWidths";
 import { api, errMessage } from "@/lib/ipc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -39,8 +46,8 @@ import {
 import { CellValueDialog } from "@/components/results/CellValueDialog";
 
 const ROW_HEIGHT = 28;
-const COL_WIDTH = 200;
 const NUM_COL = 56;
+const GRID_WIDTH_VAR = "--grid-width";
 
 export interface EditableContext {
   connId: string;
@@ -57,14 +64,20 @@ export function ResultsGrid({
   onSaved,
   foreignKeys,
   onOpenRelated,
+  columnWidths,
+  onColumnWidthChange,
 }: {
   result: QueryResult;
   editable?: EditableContext;
   onSaved?: () => void;
   foreignKeys?: ForeignKey[];
   onOpenRelated?: (target: RelatedTarget) => void;
+  columnWidths: ColumnWidths | undefined;
+  /** `null` resets the column to the default width. */
+  onColumnWidthChange: (column: string, width: number | null) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const [edits, setEdits] = useState<EditMap>(new Map());
   const [deleted, setDeleted] = useState<Set<number>>(new Set());
   const [inserts, setInserts] = useState<Record<string, Cell>[]>([]);
@@ -86,7 +99,49 @@ export function ResultsGrid({
 
   const pkSet = useMemo(() => new Set(editable?.pkColumns ?? []), [editable]);
   const canEdit = !!editable;
-  const totalWidth = result.columns.length * COL_WIDTH + NUM_COL;
+  const columnNames = useMemo(() => result.columns.map((c) => c.name), [result.columns]);
+  const totalWidth = gridWidth(columnNames, columnWidths, NUM_COL);
+  // Cells size themselves from CSS variables, so a drag can resize a column by
+  // touching one element instead of re-rendering every visible cell per frame.
+  const widthVars = useMemo(() => {
+    const vars: Record<string, string> = { [GRID_WIDTH_VAR]: `${totalWidth}px` };
+    columnNames.forEach((name, i) => {
+      vars[columnVar(i)] = `${columnWidth(columnWidths, name)}px`;
+    });
+    return vars as React.CSSProperties;
+  }, [columnNames, columnWidths, totalWidth]);
+
+  function startResize(e: React.PointerEvent<HTMLElement>, index: number, column: string) {
+    const grid = gridRef.current;
+    if (e.button !== 0 || !grid) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const handle = e.currentTarget;
+    const startX = e.clientX;
+    const startWidth = columnWidth(columnWidths, column);
+    const othersWidth = totalWidth - startWidth;
+    let width = startWidth;
+
+    function onMove(ev: PointerEvent) {
+      width = clampColumnWidth(startWidth + ev.clientX - startX);
+      grid!.style.setProperty(columnVar(index), `${width}px`);
+      grid!.style.setProperty(GRID_WIDTH_VAR, `${othersWidth + width}px`);
+    }
+    function onEnd() {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      document.body.classList.remove("col-resizing");
+      if (width !== startWidth) onColumnWidthChange(column, width);
+    }
+
+    handle.setPointerCapture(e.pointerId);
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+    document.body.classList.add("col-resizing");
+  }
 
   const fkByColumn = useMemo(() => {
     const m = new Map<string, ForeignKey>();
@@ -231,13 +286,16 @@ export function ResultsGrid({
       )}
 
       <div ref={parentRef} className="flex-1 overflow-auto text-sm">
-        <div style={{ width: totalWidth, position: "relative" }}>
+        <div
+          ref={gridRef}
+          style={{ ...widthVars, width: `var(${GRID_WIDTH_VAR})`, position: "relative" }}
+        >
           <div className="sticky top-0 z-10 flex border-b bg-muted/60 backdrop-blur">
             <Cellbox width={NUM_COL} className="justify-center text-muted-foreground/60">
               #
             </Cellbox>
-            {result.columns.map((c) => (
-              <Cellbox key={c.name} width={COL_WIDTH} className="h-8">
+            {result.columns.map((c, i) => (
+              <Cellbox key={c.name} width={`var(${columnVar(i)})`} className="relative h-8">
                 {pkSet.has(c.name) && (
                   <KeyRound className="h-3 w-3 shrink-0 text-amber-500" />
                 )}
@@ -245,6 +303,15 @@ export function ResultsGrid({
                 <span className="ml-auto truncate text-[10px] font-normal text-muted-foreground/60">
                   {c.typeName}
                 </span>
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Redimensionar coluna ${c.name}`}
+                  title="Arraste para redimensionar · duplo clique para restaurar"
+                  onPointerDown={(e) => startResize(e, i, c.name)}
+                  onDoubleClick={() => onColumnWidthChange(c.name, null)}
+                  className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-primary/40"
+                />
               </Cellbox>
             ))}
           </div>
@@ -262,7 +329,7 @@ export function ResultsGrid({
                   )}
                   style={{
                     height: ROW_HEIGHT,
-                    width: totalWidth,
+                    width: `var(${GRID_WIDTH_VAR})`,
                     transform: `translateY(${v.start}px)`,
                   }}
                 >
@@ -285,7 +352,7 @@ export function ResultsGrid({
                       </button>
                     )}
                   </Cellbox>
-                  {result.columns.map((c) => {
+                  {result.columns.map((c, colIdx) => {
                     const isEditing =
                       editing?.kind === "row" &&
                       editing.index === rowIdx &&
@@ -294,6 +361,7 @@ export function ResultsGrid({
                     return (
                       <DataCell
                         key={c.name}
+                        width={`var(${columnVar(colIdx)})`}
                         data-row={String(rowIdx)}
                         data-col={c.name}
                         value={cellValue(rowIdx, c.name)}
@@ -318,7 +386,7 @@ export function ResultsGrid({
             <div
               key={`ins-${i}`}
               className="flex border-b border-emerald-500/30 bg-emerald-500/5"
-              style={{ height: ROW_HEIGHT, width: totalWidth }}
+              style={{ height: ROW_HEIGHT, width: `var(${GRID_WIDTH_VAR})` }}
             >
               <Cellbox
                 width={NUM_COL}
@@ -332,7 +400,7 @@ export function ResultsGrid({
                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
                 </button>
               </Cellbox>
-              {result.columns.map((c) => {
+              {result.columns.map((c, colIdx) => {
                 const isEditing =
                   editing?.kind === "insert" &&
                   editing.index === i &&
@@ -340,6 +408,7 @@ export function ResultsGrid({
                 return (
                   <DataCell
                     key={c.name}
+                    width={`var(${columnVar(colIdx)})`}
                     value={row[c.name] ?? null}
                     editable
                     dirty={row[c.name] != null}
@@ -426,11 +495,11 @@ export function ResultsGrid({
 function Cellbox({
   children,
   className,
-  width = COL_WIDTH,
+  width,
 }: {
   children: React.ReactNode;
   className?: string;
-  width?: number;
+  width: number | string;
 }) {
   return (
     <div
@@ -443,6 +512,7 @@ function Cellbox({
 }
 
 interface DataCellProps {
+  width: string;
   value: Cell;
   dirty?: boolean;
   editing?: boolean;
@@ -458,6 +528,7 @@ const DataCell = forwardRef<
   DataCellProps & React.HTMLAttributes<HTMLDivElement>
 >(function DataCell(
   {
+    width,
     value,
     dirty,
     editing,
@@ -473,7 +544,7 @@ const DataCell = forwardRef<
 ) {
   if (editing) {
     return (
-      <div className="flex h-7 shrink-0 items-center border-r" style={{ width: COL_WIDTH }}>
+      <div className="flex h-7 shrink-0 items-center border-r" style={{ width }}>
         <input
           autoFocus
           defaultValue={formatCell(value)}
@@ -503,7 +574,7 @@ const DataCell = forwardRef<
         editable && "cursor-text",
         className,
       )}
-      style={{ width: COL_WIDTH }}
+      style={{ width }}
     >
       <span className="truncate">{isNull ? "NULL" : formatCell(value)}</span>
       {onOpenFk && (

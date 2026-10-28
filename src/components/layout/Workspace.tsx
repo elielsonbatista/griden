@@ -388,7 +388,9 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
   const connName = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.connName ?? "");
   const title = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.title ?? "query");
   const foreignKeys = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.foreignKeys);
+  const columnWidths = useEditor((s) => s.tabs.find((t) => t.id === tabId)?.columnWidths);
   const run = useEditor((s) => s.run);
+  const setColumnWidth = useEditor((s) => s.setColumnWidth);
   const kind = useConnections(
     (s) => s.connections.find((c) => c.id === connId)?.kind ?? "postgres",
   );
@@ -476,6 +478,8 @@ const ResultArea = memo(function ResultArea({ tabId }: { tabId: string }) {
             onSaved={() => run(tabId)}
             foreignKeys={foreignKeys}
             onOpenRelated={onOpenRelated}
+            columnWidths={columnWidths}
+            onColumnWidthChange={(column, width) => setColumnWidth(tabId, column, width)}
           />
         ) : result ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

@@ -97,6 +97,8 @@ Single-window React app. Path alias `@/*` -> `src/*`. `App.tsx` is a coordinator
 
 Tabs: a query tab shows `EditorPane` + `ResultArea`; a tab with `source` (opened from a table) shows `FilterBar` + grid, with a toggle to SQL mode. Use granular store selectors (see `ResultArea`) so editor keystrokes never re-render the grid.
 
+Grid column widths live per tab (`QueryTab.columnWidths`, persisted, pure helpers in `lib/columnWidths.ts`). Cells read their width from CSS variables (`--col-N`, `--grid-width`) on the grid container; a drag writes only those variables and commits to the store on release. Do not turn the drag into React state: it would re-render every visible cell per pointer move.
+
 ### UI conventions
 
 - **shadcn/ui** is configured (`components.json`, style `new-york`, base `neutral`, icon lib **lucide**). Primitives in `src/components/ui/`: don't hand-edit; re-run `pnpm dlx shadcn add` to upgrade. Composition wrappers belong in the feature area.
